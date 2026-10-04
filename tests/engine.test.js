@@ -1,10 +1,76 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {normalize,correct,selectPractice,mergeProgress} from '../src/engine.js';
-import {questions,exams,examQuestions} from '../src/data.js';
-import {existsSync} from 'node:fs';
-test('Japanese width and punctuation do not reject valid answers; long vowels remain meaningful',()=>{assert.equal(normalize('　ｺｰﾋｰ。 '),'コーヒー');assert(correct({answers:['たかかったです']},'たかかったです。'));assert(!correct({answers:['おおさか']},'おさか'));});
-test('repetition prioritizes errors, then unseen, then correct',()=>{const bank=[{id:'a',topic:'p'},{id:'b',topic:'p'},{id:'c',topic:'p'}];assert.deepEqual(selectPractice(bank,{a:{ok:true},c:{ok:false}},'p'),['c','b','a']);});
-test('all question ids unique and every auto question has an answer',()=>{assert.equal(new Set(questions.map(q=>q.id)).size,questions.length);for(const q of questions){assert(q.self||q.answers?.length,q.id);if(q.choices&&!q.self)assert(q.answers.every(a=>q.choices.includes(a)),q.id);}});
-test('all exams total 100 points and every original page exists',()=>{for(const e of exams){assert.equal(examQuestions.filter(q=>q.exam===e.id).reduce((n,q)=>n+q.points,0),100,e.id);}for(const q of examQuestions)assert(existsSync(`public/material/${q.exam}-${q.exam==='reading'?String(q.page).padStart(2,'0'):q.page}.jpg`),q.id);});
-test('cloud merge keeps latest answers, results and exam drafts',()=>{const a={stats:{x:{at:20,ok:false}},history:[{id:'s',at:20,ok:2}],drafts:{e:{at:20,session:null}},examDate:'2026-10-16',settingsAt:20};const b={stats:{x:{at:10,ok:true},y:{at:30,ok:true}},history:[{id:'s',at:10,ok:1}],drafts:{e:{at:10,session:{index:2}}},examDate:'2026-01-01',settingsAt:10};const m=mergeProgress(a,b);assert.equal(m.stats.x.ok,false);assert.equal(m.stats.y.ok,true);assert.equal(m.history[0].ok,2);assert.equal(m.drafts.e.session,null);assert.equal(m.examDate,'2026-10-16');});
+import { normalize, correct, selectPractice, mergeProgress } from '../src/engine.js';
+import { questions, exams, examQuestions } from '../src/data.js';
+import { existsSync } from 'node:fs';
+test('Japanese width and punctuation do not reject valid answers; long vowels remain meaningful', () => {
+  assert.equal(normalize('　ｺｰﾋｰ。 '), 'コーヒー');
+  assert(correct({ answers: ['たかかったです'] }, 'たかかったです。'));
+  assert(!correct({ answers: ['おおさか'] }, 'おさか'));
+});
+test('repetition prioritizes due over unseen and excludes future questions', () => {
+  const bank = [
+    { id: 'a', topic: 'p' },
+    { id: 'b', topic: 'p' },
+    { id: 'c', topic: 'p' },
+  ];
+  assert.deepEqual(
+    selectPractice(
+      bank,
+      { a: { ok: true, dueAt: 2000 }, c: { ok: false, dueAt: 500 } },
+      'p',
+      10,
+      1000,
+    ),
+    ['c', 'b'],
+  );
+});
+test('all question ids unique and every auto question has an answer', () => {
+  assert.equal(new Set(questions.map((q) => q.id)).size, questions.length);
+  for (const q of questions) {
+    assert(q.self || q.answers?.length, q.id);
+    if (q.choices && !q.self)
+      assert(
+        q.answers.every((a) => q.choices.includes(a)),
+        q.id,
+      );
+  }
+});
+test('all exams total 100 points and every original page exists', () => {
+  for (const e of exams) {
+    assert.equal(
+      examQuestions.filter((q) => q.exam === e.id).reduce((n, q) => n + q.points, 0),
+      100,
+      e.id,
+    );
+  }
+  for (const q of examQuestions)
+    assert(
+      existsSync(
+        `public/material/${q.exam}-${q.exam === 'reading' ? String(q.page).padStart(2, '0') : q.page}.jpg`,
+      ),
+      q.id,
+    );
+});
+test('cloud merge keeps latest answers, results and exam drafts', () => {
+  const a = {
+    stats: { x: { at: 20, ok: false } },
+    history: [{ id: 's', at: 20, ok: 2 }],
+    drafts: { e: { at: 20, session: null } },
+    examDate: '2026-10-16',
+    settingsAt: 20,
+  };
+  const b = {
+    stats: { x: { at: 10, ok: true }, y: { at: 30, ok: true } },
+    history: [{ id: 's', at: 10, ok: 1 }],
+    drafts: { e: { at: 10, session: { index: 2 } } },
+    examDate: '2026-01-01',
+    settingsAt: 10,
+  };
+  const m = mergeProgress(a, b);
+  assert.equal(m.stats.x.ok, false);
+  assert.equal(m.stats.y.ok, true);
+  assert.equal(m.history[0].ok, 2);
+  assert.equal(m.drafts.e.session, null);
+  assert.equal(m.examDate, '2026-10-16');
+});

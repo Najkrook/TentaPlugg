@@ -1,65 +1,560 @@
 import './style.css';
-import {createIcons, BookOpen, CircleCheck, ChevronRight, ArrowLeft, GraduationCap, ChartNoAxesCombined, LogIn, LogOut, Menu, X, RotateCcw, Target, CalendarDays, Flame, PencilLine, Library, Check, Cloud, CircleHelp} from 'lucide';
-import {questions,exams,examQuestions,topics,guides} from './data';
-import {correct,selectPractice,mergeProgress} from './engine';
-import {auth,login,logout,watchUser,pull,push} from './cloud';
-const $=s=>document.querySelector(s);
-const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const icon=(name,cls='')=>`<i data-lucide="${name}" class="${cls}"></i>`;
-const fresh=()=>({stats:{},history:[],drafts:{},examDate:'2026-10-16',settingsAt:0});
-let user=null,state=fresh(),session=null,view='home',filter='Alla',cloudStatus='Sparas på den här enheten',syncTimer,loaded=false;
-const key=()=>`tentaplugg-v1-${user?.uid||'guest'}`;
-function readLocal(){try{return {...fresh(),...JSON.parse(localStorage.getItem(key())||'{}')}}catch{return fresh()}}
-state=readLocal();
-function save(){try{localStorage.setItem(key(),JSON.stringify(state));}catch{toast('Webbläsaren kunde inte spara. Frigör utrymme eller tillåt lokal lagring.')}if(user&&loaded){cloudStatus='Sparar…';clearTimeout(syncTimer);const uid=user.uid;const snapshot=structuredClone(state);syncTimer=setTimeout(()=>push(uid,snapshot).then(()=>{cloudStatus='Sparat i ditt konto';updateCloud()}).catch(()=>{cloudStatus='Lokalt sparat · synkning misslyckades';updateCloud()}),800)}updateCloud();}
-function updateCloud(){const el=$('#cloud-status');if(el)el.textContent=cloudStatus;}
-function ask(message){return new Promise(resolve=>{const d=document.createElement('dialog');d.className='confirm-dialog';d.innerHTML=`<h2>Innan du fortsätter</h2><p>${esc(message)}</p><div><button class="secondary" data-cancel>Gå tillbaka</button><button class="primary" data-confirm>Fortsätt</button></div>`;document.body.append(d);d.showModal();const done=v=>{d.close();d.remove();resolve(v)};d.querySelector('[data-cancel]').onclick=()=>done(false);d.querySelector('[data-confirm]').onclick=()=>done(true);d.addEventListener('cancel',e=>{e.preventDefault();done(false)});});}
-function toast(message){$('#toast')?.remove();const el=document.createElement('div');el.id='toast';el.setAttribute('role','status');el.textContent=message;document.body.append(el);setTimeout(()=>el.remove(),6000);}
-const progress=()=>{const s=Object.values(state.stats);return {done:s.length,ok:s.filter(s=>s.ok).length,wrong:s.filter(s=>!s.ok).length}};
-const days=()=>Math.max(0,Math.ceil((new Date(state.examDate+'T12:00:00')-new Date())/86400000));
-const dateText=()=>new Date(state.examDate+'T12:00:00').toLocaleDateString('sv-SE',{day:'numeric',month:'long'});
-const navs=[['home','book-open','Plugga'],['exams','graduation-cap','Gamla tentor'],['progress','chart-no-axes-combined','Mina framsteg'],['guide','library','Snabbguide']];
-function render(){
- $('#app').innerHTML=`<aside class="sidebar"><a href="#" class="brand"><span class="brand-symbol" lang="ja">学</span><span>TentaPlugg<small>JAPANSKA</small></span></a><nav>${navs.map(([id,i,label])=>`<button data-view="${id}" class="nav-item ${view===id?'active':''}">${icon(i)}<span>${label}</span></button>`).join('')}</nav><div class="side-bottom"><div class="exam-note">${icon('calendar-days')}<span>Nästa tenta<strong>${dateText()}</strong></span></div><p>Lite varje dag.<br>En partikel i taget.</p><span lang="ja" class="side-japanese">がんばって！</span></div></aside><div class="shell"><header class="topbar"><span class="breadcrumb">Japanska för nybörjare <span>/</span> GEMA70</span><span class="mobile-brand">学 <b>TentaPlugg</b></span><button class="account" id="account">${icon(user?'log-out':'log-in')}<span>${user?esc(user.displayName?.split(' ')[0]||'Logga ut'):'Logga in med Google'}</span></button></header><main id="main">${session?sessionView():view==='home'?homeView():view==='exams'?examsView():view==='progress'?progressView():guideView()}</main><footer><span id="cloud-status">${esc(cloudStatus)}</span><span>GEMA70 · JAPC11</span></footer></div><nav class="mobile-nav">${navs.map(([id,i,l])=>`<button data-view="${id}" class="${view===id?'active':''}">${icon(i)}<span>${id==='progress'?'Framsteg':id==='exams'?'Tentor':l}</span></button>`).join('')}</nav>`;
- createIcons({icons:{BookOpen,CircleCheck,ChevronRight,ArrowLeft,GraduationCap,ChartNoAxesCombined,LogIn,LogOut,Menu,X,RotateCcw,Target,CalendarDays,Flame,PencilLine,Library,Check,Cloud,CircleHelp}});
- bind();
+import { html, render as renderTemplate } from 'lit-html';
+import { keyed } from 'lit-html/directives/keyed.js';
+import { questions, exams, examQuestions } from './data.js';
+import {
+  fresh,
+  correct,
+  selectPractice,
+  mergeProgress,
+  ensurePlan,
+  dayKey,
+  recordReview,
+  latestAttempt,
+  examErrors,
+  importGuest as mergeGuest,
+} from './engine.js';
+import { createSession, submitSession, updateResult } from './session.js';
+import { createLocalSaver, readLocal } from './storage.js';
+import { createSyncQueue } from './sync.js';
+import { login, logout, finishRedirect, watchUser, pull, push } from './cloud.js';
+import { ttsSupported, speak, stopSpeech } from './speech.js';
+import { homeView } from './views/home.js';
+import { examsView } from './views/exams.js';
+import { progressView } from './views/progress.js';
+import { guideView } from './views/guide.js';
+import { sessionView } from './views/session.js';
+import { icon, dateText } from './views/shared.js';
+const app = document.querySelector('#app');
+let user = null,
+  state = fresh(),
+  session = null,
+  view = 'home',
+  status = 'Sparas på den här enheten';
+let saver,
+  sync,
+  accountEpoch = 0,
+  blocked = false,
+  composing = false,
+  authBusy = false,
+  screenKey = '',
+  message = '',
+  messageTimer;
+const imageErrors = new Set();
+const navs = [
+  ['home', 'BookOpen', 'Plugga'],
+  ['exams', 'GraduationCap', 'Gamla tentor'],
+  ['progress', 'ChartNoAxesCombined', 'Mina framsteg'],
+  ['guide', 'Library', 'Snabbguide'],
+];
+function announce(text) {
+  message = text;
+  render();
+  clearTimeout(messageTimer);
+  messageTimer = setTimeout(() => {
+    message = '';
+    render();
+  }, 6000);
 }
-function homeView(){const p=progress();return `<section class="page-heading"><div><p class="overline">DITT STUDIERUM</p><h1>Lite närmare <span>日本語.</span></h1><p>Träna på det som kommer på tentan.</p></div><div class="countdown"><strong>${days()}</strong><span>dagar till tentan<small>${dateText()}</small></span></div></section><section class="focus-panel"><div class="focus-copy"><span class="focus-label">${icon('target')} Dagens fokus</span><h2>Små tecken.<br>Stor skillnad.</h2><p>は, が, に eller で? Ge partiklarna tio frågor.<br class="desktop"> Vi plockar upp det du behöver repetera.</p><button class="primary" data-start="Partiklar">Träna partiklar ${icon('chevron-right')}</button><span class="session-hint">10 frågor · cirka 5 minuter</span></div><div class="particle-art" aria-hidden="true"><div class="glyph small">を</div><div class="glyph mid">に</div><div class="glyph main">は</div><div class="glyph low">で</div><div class="glyph last">が</div><span>ひとつずつ、一歩ずつ。</span></div></section><div class="stats-strip"><div>${icon('circle-check')}<span><strong>${p.done}</strong> frågor övade</span></div><div>${icon('target')}<span><strong>${p.done?Math.round(p.ok/p.done*100):0}%</strong> rätt senast</span></div><div>${icon('rotate-ccw')}<span><strong>${p.wrong}</strong> att repetera</span></div></div><section class="section-block"><div class="section-title"><h2>Vad vill du öva på?</h2><button class="text-button" data-start="Alla">Blanda alla ämnen ${icon('chevron-right')}</button></div><div class="topic-grid">${topics.map((t,i)=>{const qs=questions.filter(q=>q.topic===t),done=qs.filter(q=>state.stats[q.id]?.ok).length;return `<button class="topic-card" data-start="${t}"><span class="topic-letter t${i}" lang="ja">${['は','い','字','文','読'][i]}</span><div><h3>${t}</h3><p>${qs.length} frågor · ${done} bemästrade</p><div class="mini-track"><span style="width:${done/qs.length*100}%"></span></div></div>${icon('chevron-right')}</button>`}).join('')}<button class="topic-card repeat" id="repeat">${icon('rotate-ccw')}<div><h3>Öva på dina misstag</h3><p>${p.wrong?'Dags för ett nytt försök':'Dina svåra frågor samlas här'}</p></div>${icon('chevron-right')}</button></div></section><section class="exam-banner"><div class="exam-icon">${icon('graduation-cap')}</div><div><h2>Testa dig på en riktig tenta</h2><p>Tre gamla tentor. Svara i din takt och rätta efteråt.</p></div><button class="secondary" data-view="exams">Välj tenta ${icon('chevron-right')}</button></section>`;}
-function examsView(){return `<div class="page-heading"><div><p class="overline">FRÅN KURSMATERIALET</p><h1>Gamla tentor</h1><p>Alla uppgifter, med originalbilder och sparade svar.</p></div></div><div class="notice">${icon('circle-help')}<p>Tentorna saknar officiella facit. Modellsvaren är framtagna som studiestöd. Längre svar rättar du själv; poängen är en uppskattning.</p></div><div class="exam-list">${exams.map((e,i)=>`<article class="exam-card"><span class="exam-number">0${i+1}</span><div><span class="muted">${e.subtitle}</span><h2>${e.title}</h2><p>${e.description}</p><div class="exam-meta"><span>${examQuestions.filter(q=>q.exam===e.id).length} delfrågor</span><span>${e.points} poäng</span><a href="/material/${e.id}.pdf" target="_blank" rel="noopener">Visa original-PDF</a></div></div><button class="primary" data-exam="${e.id}">${getDraft(e.id)?'Fortsätt tentan':'Börja tentan'} ${icon('chevron-right')}</button></article>`).join('')}</div>`;}
-function progressView(){const p=progress();return `<div class="page-heading"><div><p class="overline">EN FRÅGA I TAGET</p><h1>Mina framsteg</h1><p>${user?'Dina resultat är privata och sparas i ditt konto.':'Dina resultat sparas här. Logga in för att synka mellan enheter.'}</p></div></div><section class="progress-top"><div class="score-circle"><strong>${p.done?Math.round(p.ok/p.done*100):0}%</strong><span>rätt senast</span></div><div><h2>${p.done} frågor övade</h2><p>${p.wrong} frågor väntar på repetition.</p><button class="primary" id="repeat">Repetera misstag</button></div></section><div class="section-title"><h2>Ämne för ämne</h2></div>${topics.map(t=>{const list=questions.filter(q=>q.topic===t);const n=list.filter(q=>state.stats[q.id]?.ok).length;return `<div class="progress-row"><span>${t}</span><div class="mini-track"><span style="width:${100*n/list.length}%"></span></div><strong>${n} / ${list.length}</strong></div>`}).join('')}<section class="section-block"><div class="section-title"><h2>Min studieplan</h2><label class="date-label">Tentadatum <input type="date" id="exam-date" value="${esc(state.examDate)}"></label></div><p>${days()?`${days()} dagar kvar. Sikta på ett partikelpass varje dag och varva med böjningar, läsning och gamla tentor.`:'Tentadatumet är här eller har passerat. Du kan fortsätta träna eller välja ett nytt datum.'}</p></section><section class="section-block"><h2>Senaste passen</h2>${state.history.length?state.history.slice(0,10).map(h=>`<div class="history-row"><span>${esc(h.name)}<small>${new Date(h.at).toLocaleString('sv-SE',{dateStyle:'short',timeStyle:'short'})}</small></span><strong>${h.ok} / ${h.total} rätt</strong></div>`).join(''):'<p class="muted">Ditt första avslutade pass dyker upp här.</p>'}</section>`;}
-function guideView(){return `<div class="page-heading"><div><p class="overline">NÄR DU BEHÖVER EN LEDTRÅD</p><h1>Snabbguide</h1><p>Reglerna du oftast behöver på tentorna.</p></div></div><div class="guide-grid">${guides.map((g,i)=>`<article class="guide"><span class="guide-index">0${i+1}</span><h2>${g.title}</h2><p>${g.text}</p></article>`).join('')}</div><section class="section-block"><h2>Material & rättning</h2><p>27 partikelluckor bygger på facit i Lesson5. Övriga svar är framtagna modellösningar. Flera formuleringar kan vara korrekta, särskilt vid översättning och fria meningar.</p><a class="text-link" href="/material/lesson5.pdf" target="_blank" rel="noopener">Öppna Lesson5</a><p class="muted">Mobiltangentbordet hjälper med kanji. Öva gärna även för hand om tentan skrivs på papper.</p></section>`;}
-function getDraft(id){return state.drafts?.[id]?.session||null}
-function persistSession(){if(session?.exam){state.drafts[session.exam]={at:Date.now(),session:structuredClone(session)};save();}}
-function start(topic,onlyWrong=false){const bank=onlyWrong?questions.filter(q=>state.stats[q.id]&&!state.stats[q.id].ok):questions;const ids=selectPractice(bank,state.stats,topic);if(!ids.length){toast('Inga frågor att repetera ännu. Börja med ett träningspass.');return}session={ids,index:0,answers:{},grades:{},name:onlyWrong?'Repetition':topic==='Alla'?'Blandad träning':topic};render();window.scrollTo(0,0);}
-function startExam(id){session=getDraft(id)||{exam:id,ids:examQuestions.filter(q=>q.exam===id).map(q=>q.id),index:0,answers:{},grades:{},name:exams.find(e=>e.id===id).title+' · '+exams.find(e=>e.id===id).subtitle};view='exams';render();window.scrollTo(0,0);}
-const currentQ=()=>questions.find(q=>q.id===session.ids[session.index]);
-function sessionView(){if(session.done)return resultView();const q=currentQ();const value=session.answers[q.id]||'';const graded=session.grades[q.id]!==undefined;const feedback=(!session.exam&&graded)||session.review;const self=q.self;return `<div class="session-top"><button class="text-button" id="exit">${icon('arrow-left')} ${session.exam?'Spara & lämna':'Avsluta pass'}</button><span>${session.exam?'Tentaläge':'Träningspass'} · ${session.index+1} / ${session.ids.length}</span></div><div class="session-track"><span style="width:${(session.index+1)/session.ids.length*100}%"></span></div><section class="question-panel"><div class="question-meta"><span>${esc(q.topic)}</span><span>${q.official?'Originalfacit · Lesson5':q.exam?'Originalfråga · modellösning':'Extra träning'}</span></div><h1 class="question-title">${esc(q.prompt).replace(/\n/g,'<br>')}</h1>${q.context?`<details class="context" open><summary>Läs brevet</summary><p lang="ja">${esc(q.context)}</p></details>`:''}${q.exam?`<details class="original" ${q.image?'open':''}><summary>Visa originaluppgiften · sida ${q.page}</summary><a href="/material/${q.exam}-${q.exam==='reading'?String(q.page).padStart(2,'0'):q.page}.jpg" target="_blank" rel="noopener"><img loading="lazy" src="/material/${q.exam}-${q.exam==='reading'?String(q.page).padStart(2,'0'):q.page}.jpg" alt="Originalsida ${q.page}. Öppna bilden för att förstora."></a><small>Tryck på bilden för att förstora.</small></details>`:''}${q.choices&&!self?`<div class="choices">${q.choices.map(c=>`<button class="choice ${value===c?'selected':''} ${feedback&&q.answers?.includes(c)?'right':''}" data-choice="${esc(c)}" ${feedback?'disabled':''}>${esc(c)}</button>`).join('')}</div>`:`<label class="answer-label" for="answer">Ditt svar</label><textarea id="answer" rows="${self?5:2}" placeholder="${self?'Skriv ditt svar här…':'Skriv med ditt japanska tangentbord…'}" ${feedback?'readonly':''} autocapitalize="off" spellcheck="false">${esc(value)}</textarea>`}${!self&&!q.choices?'<p class="input-hint">Skriv × om ingen partikel behövs.</p>':''}${feedback?`<div class="feedback ${self?'neutral':session.grades[q.id]?'good':'again'}" role="status"><h3>${self?'Jämför med modellösningen':session.grades[q.id]?'Rätt svar!':'Nästan – titta på förklaringen'}</h3>${!self?`<p class="correct-answer">${esc(q.answers?.join(' / '))}</p>`:''}<p>${esc(q.explanation||q.model)}</p>${self?`<p>Stämmer ditt svar med de viktiga punkterna?</p><div class="self-actions"><button class="secondary" data-grade="false">Behöver öva mer</button><button class="primary" data-grade="true">Jag kunde detta</button></div>`:''}${!self&&!session.grades[q.id]?'<button class="text-button" id="override">Mitt svar är också korrekt</button>':''}</div>`:''}<div class="question-actions">${session.index>0?`<button class="secondary" id="prev">Föregående</button>`:'<span></span>'}${session.exam&&!session.review?`<button class="primary" id="next">${session.index===session.ids.length-1?'Lämna in tentan':'Nästa fråga'} ${icon('chevron-right')}</button>`:feedback&&!self?`<button class="primary" id="next">${session.index===session.ids.length-1?'Visa resultat':'Nästa fråga'} ${icon('chevron-right')}</button>`:!feedback?`<button class="primary" id="check">${self?'Visa modellösning':'Kontrollera svar'} ${icon('check')}</button>`:''}</div>${session.exam?`<div class="question-jump">${session.ids.map((id,i)=>`<button data-jump="${i}" class="${i===session.index?'current':''} ${session.answers[id]?'answered':''}" aria-label="Fråga ${i+1}" ${i===session.index?'aria-current="step"':''}>${i+1}</button>`).join('')}</div>`:''}</section>`;}
-function resultView(){const items=session.ids.map(id=>questions.find(q=>q.id===id));const graded=items.filter(q=>session.grades[q.id]!==undefined);const right=graded.filter(q=>session.grades[q.id]);const pending=items.filter(q=>q.self&&session.grades[q.id]===undefined);const earned=right.reduce((n,q)=>n+(q.points||1),0);return `<section class="result-panel"><span class="result-icon">${icon('circle-check')}</span><p class="overline">${session.exam?'TENTAN ÄR INLÄMNAD':'BRA JOBBAT'}</p><h1>${pending.length?'Dags att rätta fritexten.':'Ett steg framåt.'}</h1><div class="result-number">${right.length}<span> / ${session.ids.length}</span></div><p>rätt eller självbedömda som rätt</p>${session.exam?`<p>${earned} uppskattade poäng av ${items.reduce((n,q)=>n+(q.points||1),0)}. ${pending.length} svar väntar på självbedömning.</p><p class="muted">Detta är ett övningsresultat, inte ett officiellt tentabetyg.</p>`:''}<div class="result-buttons">${pending.length?'<button class="primary" id="review-self">Rätta längre svar</button>':'<button class="primary" id="finish">Till studierummet</button>'}<button class="secondary" id="review-all">Gå igenom svaren</button></div><div class="result-summary">${items.map((q,i)=>`<button data-review="${i}"><span class="result-marker ${session.grades[q.id]?'ok':''}">${session.grades[q.id]===undefined?'?':session.grades[q.id]?'✓':'↻'}</span><span>${esc(q.prompt).slice(0,100)}</span>${icon('chevron-right')}</button>`).join('')}</div></section>`;}
-function record(q,ok){session.grades[q.id]=ok;state.stats[q.id]={ok,at:Date.now(),attempts:(state.stats[q.id]?.attempts||0)+1};save();persistSession();}
-function finishSession(){session.done=true;const ok=session.ids.filter(id=>session.grades[id]).length;session.historyId??=crypto.randomUUID();const entry={id:session.historyId,name:session.name,ok,total:session.ids.length,at:Date.now()};state.history=[entry,...state.history.filter(x=>x.id!==entry.id)].slice(0,100);save();persistSession();render();window.scrollTo(0,0);}
-async function advance(){if(session.reviewSelf){const i=session.ids.findIndex(id=>questions.find(q=>q.id===id).self&&session.grades[id]===undefined);if(i<0){finishSession();return}session.index=i;}else if(session.index<session.ids.length-1)session.index++;else{if(session.exam&&!session.review){const missing=session.ids.filter(id=>!session.answers[id]?.trim()).length;if(missing&&!await ask(`${missing} frågor saknar svar. Vill du ändå lämna in?`))return;session.ids.forEach(id=>{const q=questions.find(q=>q.id===id);if(!q.self)record(q,correct(q,session.answers[id]||''));});}finishSession();return}persistSession();render();window.scrollTo(0,0);}
-function review(index,selfOnly=false){session.done=false;session.review=true;session.reviewSelf=selfOnly;session.index=index;render();window.scrollTo(0,0);}
-function bind(){
- document.querySelectorAll('[data-view]').forEach(b=>b.onclick=async()=>{if(session&&!session.exam&&!session.done&&!await ask('Lämna träningspasset? Redan rättade frågor sparas.'))return;persistSession();session=null;view=b.dataset.view;render();window.scrollTo(0,0)});
- document.querySelectorAll('[data-start]').forEach(b=>b.onclick=()=>start(b.dataset.start));
- document.querySelectorAll('[data-exam]').forEach(b=>b.onclick=()=>startExam(b.dataset.exam));
- $('#repeat')?.addEventListener('click',()=>start('Alla',true));
- $('#account')?.addEventListener('click',async()=>{try{if(user){await logout()}else await login()}catch(e){toast(e.code==='auth/popup-closed-by-user'?'Inloggningen avbröts. Du kan fortsätta som gäst.':'Inloggningen gick inte att slutföra. Kontrollera att popupfönster tillåts och försök igen.')}});
- $('#exam-date')?.addEventListener('change',e=>{if(!e.target.value)return;state.examDate=e.target.value;state.settingsAt=Date.now();save();render()});
- $('#answer')?.addEventListener('input',e=>{session.answers[currentQ().id]=e.target.value;persistSession()});
- document.querySelectorAll('[data-choice]').forEach(b=>b.onclick=()=>{session.answers[currentQ().id]=b.dataset.choice;persistSession();render()});
- $('#exit')?.addEventListener('click',()=>{persistSession();session=null;render()});
- $('#prev')?.addEventListener('click',()=>{session.index--;persistSession();render()});
- $('#next')?.addEventListener('click',advance);
- $('#check')?.addEventListener('click',()=>{const q=currentQ();if(!session.answers[q.id]?.trim()){toast('Skriv eller välj ett svar först.');return}if(q.self){session.grades[q.id]=null;render();return}record(q,correct(q,session.answers[q.id]));render()});
- document.querySelectorAll('[data-grade]').forEach(b=>b.onclick=()=>{record(currentQ(),b.dataset.grade==='true');advance()});
- $('#override')?.addEventListener('click',()=>{record(currentQ(),true);toast('Markerat som rätt genom självbedömning.');render()});
- document.querySelectorAll('[data-jump]').forEach(b=>b.onclick=()=>{session.index=Number(b.dataset.jump);persistSession();render();window.scrollTo(0,0)});
- $('#review-self')?.addEventListener('click',()=>review(session.ids.findIndex(id=>questions.find(q=>q.id===id).self&&session.grades[id]===undefined),true));
- $('#review-all')?.addEventListener('click',()=>review(0));
- document.querySelectorAll('[data-review]').forEach(b=>b.onclick=()=>review(Number(b.dataset.review)));
- $('#finish')?.addEventListener('click',()=>{if(session.exam){state.drafts[session.exam]={at:Date.now(),session:null};save()}session=null;view='home';render()});
+function setupLocal(uid) {
+  blocked = false;
+  try {
+    state = readLocal(localStorage, uid);
+  } catch (error) {
+    state = fresh();
+    blocked = true;
+    message = error.message;
+  }
+  const epoch = accountEpoch;
+  saver = createLocalSaver({
+    storage: localStorage,
+    uid,
+    getState: () => state,
+    onSaved: (payload) => {
+      if (epoch === accountEpoch && user && sync) sync.queue(JSON.parse(payload));
+    },
+    onError: () => {
+      status = 'Kunde inte spara lokalt';
+      announce('Lagringen är full eller blockerad. Dina ändringar finns kvar i den öppna appen.');
+    },
+  });
 }
-watchUser(async nextUser=>{clearTimeout(syncTimer);loaded=false;user=nextUser;session=null;state=readLocal();cloudStatus=user?'Hämtar dina framsteg…':'Sparas på den här enheten';render();if(user){const uid=user.uid;try{const remote=await pull(uid);if(user?.uid!==uid)return;if(remote)state=mergeProgress(state,remote);loaded=true;cloudStatus='Sparat i ditt konto';save()}catch{loaded=true;cloudStatus='Lokalt sparat · ingen kontakt med molnet';}render()}else loaded=true;});
-window.addEventListener('online',()=>{if(user)save()});
+function captureSession() {
+  if (session) {
+    const id = session.mode === 'exam' ? session.exam : 'practice';
+    const previous = state.drafts[id];
+    if (previous?.session?.attemptId && previous.session.attemptId !== session.attemptId)
+      state.drafts[`attempt-${previous.session.attemptId}`] = previous;
+    delete state.drafts[`attempt-${session.attemptId}`];
+    state.drafts[id] = { at: Date.now(), session };
+  }
+}
+function persist(immediate = false) {
+  if (blocked) return;
+  captureSession();
+  if (immediate) {
+    saver.mark();
+    saver.flush();
+  } else saver.schedule();
+}
+function flush() {
+  if (blocked) return;
+  captureSession();
+  saver.mark();
+  saver.flush();
+}
+function currentQ() {
+  return questions.find((q) => q.id === session?.ids[session.index]);
+}
+function progress() {
+  const stats = Object.values(state.stats);
+  return {
+    done: stats.length,
+    ok: stats.filter((s) => s.ok).length,
+    wrong: stats.filter((s) => !s.ok).length,
+    due: stats.filter((s) => s.dueAt <= Date.now()).length,
+  };
+}
+function plan() {
+  const today = dayKey(Date.now()),
+    existing = state.plans[today];
+  const result = ensurePlan(state, questions, Date.now());
+  if (!existing) persist();
+  return result;
+}
+function render(focus = false) {
+  if (composing) return;
+  const key = session ? `${session.attemptId}:${session.done ? 'result' : session.index}` : view;
+  if (key !== screenKey) {
+    stopSpeech();
+    screenKey = key;
+  }
+  const ctx = {
+    state,
+    session,
+    user,
+    now: Date.now(),
+    plan: plan(),
+    imageErrors,
+    progress,
+    tts: ttsSupported(),
+    start,
+    startTask,
+    startExam,
+    startErrors,
+    openAttempt,
+    resumeDraft,
+    navigate,
+    exit,
+    jump,
+    next,
+    check,
+    grade,
+    answer,
+    review,
+    reviewPending,
+    changeDate,
+    importGuest,
+    imageError: (path) => {
+      imageErrors.add(path);
+      render();
+    },
+    setComposing: (value) => {
+      composing = value;
+    },
+    speak: speakText,
+  };
+  const body = session
+    ? sessionView(ctx)
+    : view === 'home'
+      ? homeView(ctx)
+      : view === 'exams'
+        ? examsView(ctx)
+        : view === 'progress'
+          ? progressView(ctx)
+          : guideView(ctx);
+  renderTemplate(
+    html`<aside class="sidebar">
+        <a
+          href="#"
+          class="brand"
+          @click=${(e) => {
+            e.preventDefault();
+            navigate('home');
+          }}
+          ><span class="brand-symbol" lang="ja">学</span
+          ><span>TentaPlugg<small>JAPANSKA</small></span></a
+        >
+        <nav>
+          ${navs.map(([id, i, label]) => html`<button class="nav-item ${view === id ? 'active' : ''}" @click=${() => navigate(id)}>${icon(i)}<span>${label}</span></button>`)}
+        </nav>
+        <div class="side-bottom">
+          <div class="exam-note">
+            ${icon('CalendarDays')}<span
+              >Tentadatum<strong>${dateText(state.examDate)}</strong></span
+            >
+          </div>
+          <p>Lite varje dag.<br />En partikel i taget.</p>
+          <span lang="ja" class="side-japanese">がんばって！</span>
+        </div>
+      </aside>
+      <div class="shell">
+        <header class="topbar">
+          <span class="breadcrumb">Japanska för nybörjare <span>/</span> GEMA70</span
+          ><span class="mobile-brand"><span lang="ja">学</span><b>TentaPlugg</b></span
+          ><button class="account" id="account" ?disabled=${authBusy} @click=${account}>
+            ${icon(user ? 'LogOut' : 'LogIn')}<span
+              >${authBusy ? 'Vänta…' : user ? `Logga ut · ${user.displayName?.split(' ')[0] || 'konto'}` : 'Logga in med Google'}</span
+            >
+          </button>
+        </header>
+        <main id="main">${keyed(session?.attemptId || view, body)}</main>
+        <footer><span id="cloud-status">${status}</span><span>GEMA70 · JAPC11</span></footer>
+      </div>
+      <nav class="mobile-nav">
+        ${navs.map(([id, i, l]) => html`<button class=${view === id ? 'active' : ''} @click=${() => navigate(id)}>${icon(i)}<span>${id === 'progress' ? 'Framsteg' : id === 'exams' ? 'Tentor' : l}</span></button>`)}
+      </nav>
+      <div class="sr-only" role="status" aria-live="polite" aria-atomic="true">${message}</div>
+      ${message ? html`<div id="toast" aria-hidden="true">${message}</div>` : ''}`,
+    app,
+  );
+  if (focus) {
+    document.querySelector('main h1')?.focus({ preventScroll: true });
+    window.scrollTo(0, 0);
+  }
+}
+function ask(text, confirmLabel = 'Fortsätt') {
+  return new Promise((resolve) => {
+    const dialog = document.createElement('dialog');
+    dialog.className = 'confirm-dialog';
+    const done = (value) => {
+      dialog.close();
+      dialog.remove();
+      resolve(value);
+    };
+    renderTemplate(
+      html`<h2>Innan du fortsätter</h2>
+        <p>${text}</p>
+        <div>
+          <button class="secondary" @click=${() => done(false)}>Gå tillbaka</button
+          ><button class="primary" @click=${() => done(true)}>${confirmLabel}</button>
+        </div>`,
+      dialog,
+    );
+    document.body.append(dialog);
+    dialog.addEventListener('cancel', (e) => {
+      e.preventDefault();
+      done(false);
+    });
+    dialog.showModal();
+  });
+}
+function navigate(id) {
+  flush();
+  session = null;
+  view = id;
+  render(true);
+}
+async function start(topic, options = {}) {
+  let bank = questions;
+  if (options.wrong) bank = bank.filter((q) => state.stats[q.id] && !state.stats[q.id].ok);
+  if (options.dueOnly) bank = bank.filter((q) => state.stats[q.id]?.dueAt <= Date.now());
+  let ids = selectPractice(bank, state.stats, topic, 10, Date.now(), options);
+  if (!ids.length) {
+    if (
+      !options.extra &&
+      !options.wrong &&
+      (await ask(
+        'Dagens repetition är klar för det här urvalet. Vill du träna extra?',
+        'Träna extra',
+      ))
+    )
+      ids = selectPractice(bank, state.stats, topic, 10, Date.now(), { extra: true });
+    else {
+      announce('Inga frågor väntar på repetition i det här urvalet.');
+      return;
+    }
+  }
+  if (!ids.length) {
+    announce('Inga frågor att öva ännu.');
+    return;
+  }
+  flush();
+  session = createSession(
+    ids,
+    options.wrong ? 'Repetition av misstag' : topic === 'Alla' ? 'Blandad träning' : topic,
+  );
+  persist(true);
+  render(true);
+}
+function startTask(task) {
+  flush();
+  const p = plan(),
+    draft = state.drafts.practice?.session;
+  session =
+    draft?.taskId === task.id && !draft.done
+      ? structuredClone(draft)
+      : createSession(task.ids, task.name, { taskId: task.id, planDay: p.day });
+  persist(true);
+  render(true);
+}
+function startExam(id) {
+  flush();
+  const e = exams.find((e) => e.id === id),
+    draft = state.drafts[id]?.session;
+  session =
+    draft && !draft.done
+      ? structuredClone(draft)
+      : createSession(
+          examQuestions.filter((q) => q.exam === id).map((q) => q.id),
+          `${e.title} · ${e.subtitle}`,
+          { mode: 'exam', exam: id },
+        );
+  session.attemptId ||= crypto.randomUUID();
+  session.revealed ||= {};
+  view = 'exams';
+  persist(true);
+  render(true);
+}
+function startErrors(exam) {
+  const last = latestAttempt(state, exam),
+    ids = examErrors(last);
+  if (!ids.length) {
+    announce('Inga fel att repetera från senaste inlämningen.');
+    return;
+  }
+  flush();
+  session = createSession(ids, `Felträning · ${exams.find((e) => e.id === exam).title}`, {
+    sourceAttemptId: last.attemptId,
+  });
+  persist(true);
+  render(true);
+}
+function openAttempt(attempt) {
+  flush();
+  session = structuredClone(attempt);
+  session.done = true;
+  render(true);
+}
+function resumeDraft(draft) {
+  flush();
+  session = structuredClone(draft.session);
+  session.revealed ||= {};
+  persist(true);
+  render(true);
+}
+function exit() {
+  flush();
+  session = null;
+  view = 'home';
+  render(true);
+}
+function answer(value, draw = true) {
+  if (!session) return;
+  session.answers[currentQ().id] = value;
+  persist();
+  if (draw) render();
+}
+function check() {
+  if (composing) return;
+  const q = currentQ();
+  if (!session.answers[q.id]?.trim()) {
+    announce('Skriv eller välj ett svar först.');
+    return;
+  }
+  if (q.self) {
+    session.revealed ||= {};
+    session.revealed[q.id] = true;
+    persist(true);
+    announce('Modellösningen visas. Jämför och bedöm ditt svar.');
+  } else grade(correct(q, session.answers[q.id]));
+}
+function grade(ok, advance = false) {
+  const q = currentQ();
+  recordReview(state, session, q.id, ok, Date.now());
+  updateResult(state, session, questions, Date.now());
+  persist(true);
+  if (advance) next();
+  else announce(ok ? 'Rätt svar.' : 'Inte rätt denna gång. Förklaringen visas.');
+}
+function jump(index) {
+  flush();
+  session.index = index;
+  persist(true);
+  render(true);
+}
+async function next() {
+  if (session.reviewSelf) {
+    const index = session.ids.findIndex(
+      (id) => questions.find((q) => q.id === id)?.self && typeof session.grades[id] !== 'boolean',
+    );
+    if (index >= 0) {
+      jump(index);
+      return;
+    }
+  } else if (session.index < session.ids.length - 1) {
+    jump(session.index + 1);
+    return;
+  }
+  if (session.mode === 'exam' && !session.submittedAt) {
+    const missing = session.ids.filter((id) => !session.answers[id]?.trim()).length;
+    if (
+      missing &&
+      !(await ask(`${missing} frågor saknar svar. Vill du ändå lämna in?`, 'Lämna in'))
+    )
+      return;
+  }
+  submitSession(state, session, questions, Date.now());
+  persist(true);
+  render(true);
+}
+function review(index, selfOnly = false) {
+  session.done = false;
+  session.review = true;
+  session.reviewSelf = selfOnly;
+  jump(index);
+}
+function reviewPending() {
+  const index = session.ids.findIndex(
+    (id) => questions.find((q) => q.id === id)?.self && typeof session.grades[id] !== 'boolean',
+  );
+  if (index >= 0) review(index, true);
+}
+function changeDate(date) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+  state.examDate = date;
+  state.settingsAt = Date.now();
+  persist(true);
+  render();
+}
+function speakText(text, button) {
+  if (button.classList.contains('speaking')) {
+    stopSpeech();
+    button.classList.remove('speaking');
+    return;
+  }
+  document.querySelectorAll('.speaking').forEach((el) => el.classList.remove('speaking'));
+  button.classList.add('speaking');
+  if (speak(text, { onend: () => button.classList.remove('speaking') }) === 'no-voice')
+    announce('Ingen japansk röst hittades. Lägg till japanska i enhetens talinställningar.');
+}
+async function account() {
+  if (authBusy) return;
+  flush();
+  authBusy = true;
+  render();
+  try {
+    if (user) {
+      await sync?.flush();
+      await logout();
+    } else await login(flush);
+  } catch (error) {
+    announce(
+      error.code === 'auth/popup-closed-by-user'
+        ? 'Inloggningen avbröts. Du kan fortsätta som gäst.'
+        : 'Inloggningen gick inte att slutföra. Försök igen.',
+    );
+  } finally {
+    authBusy = false;
+    render();
+  }
+}
+async function importGuest() {
+  if (!user) return;
+  const uid = user.uid;
+  let guest;
+  try {
+    guest = readLocal(localStorage, null);
+  } catch (error) {
+    announce(error.message);
+    return;
+  }
+  const count = Object.keys(guest.stats).length,
+    drafts = Object.values(guest.drafts).filter((d) => d.session && !d.session.done).length;
+  if (!count && !drafts && !guest.history.length) {
+    announce('Det finns inga gästresultat att importera.');
+    return;
+  }
+  if (
+    !(await ask(
+      `Importera ${count} övade frågor, ${guest.history.length} pass och ${drafts} utkast till ${user.email || user.displayName}? Kontots tentadatum behålls och gästoriginalet ligger kvar.`,
+      'Importera',
+    ))
+  )
+    return;
+  if (user?.uid !== uid) return;
+  state = mergeGuest(state, guest);
+  persist(true);
+  render();
+  announce('Gästdata har importerats utan dubbletter.');
+}
+setupLocal(null);
 render();
+watchUser(async (nextUser) => {
+  if ((user?.uid || null) === (nextUser?.uid || null)) return;
+  flush();
+  saver.dispose();
+  sync?.dispose();
+  accountEpoch++;
+  const epoch = accountEpoch;
+  user = nextUser;
+  session = null;
+  setupLocal(user?.uid);
+  view = 'home';
+  if (!user) {
+    sync = null;
+    status = 'Sparas på den här enheten';
+    render(true);
+    return;
+  }
+  const uid = user.uid;
+  sync = createSyncQueue({
+    uid,
+    push,
+    onStatus: (value) => {
+      if (epoch === accountEpoch) {
+        status = value;
+        const el = document.querySelector('#cloud-status');
+        if (el) el.textContent = value;
+      }
+    },
+    onMerged: (remote) => {
+      if (epoch === accountEpoch) {
+        state = mergeProgress(state, remote);
+        try {
+          localStorage.setItem(`tentaplugg-v1-${uid}`, JSON.stringify(state));
+        } catch {
+          status = 'Kunde inte spara lokalt';
+        }
+      }
+    },
+  });
+  status = 'Hämtar dina framsteg…';
+  render(true);
+  try {
+    const remote = await pull(uid);
+    if (epoch !== accountEpoch) return;
+    if (remote) state = mergeProgress(state, remote);
+    status = 'Sparat i ditt konto';
+  } catch {
+    if (epoch !== accountEpoch) return;
+    status = 'Lokalt sparat · väntar på synkning';
+  }
+  if (epoch !== accountEpoch) return;
+  persist(true);
+  render();
+});
+finishRedirect().catch(() =>
+  announce('Inloggningen kunde inte slutföras efter återkomsten. Dina lokala svar finns kvar.'),
+);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') flush();
+  else if (!session) render();
+});
+window.addEventListener('pagehide', flush);
+window.addEventListener('online', () => {
+  if (user) {
+    flush();
+    sync?.flush();
+  }
+});

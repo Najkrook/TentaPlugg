@@ -1,17 +1,7 @@
 {
   "hosting": {
     "public": "dist",
-    "ignore": [
-      "firebase.json",
-      "**/.*",
-      "**/node_modules/**"
-    ],
-    "rewrites": [
-      {
-        "source": "**",
-        "destination": "/index.html"
-      }
-    ],
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
     "headers": [
       {
         "source": "**",
@@ -35,8 +25,21 @@
     "providers": {
       "googleSignIn": {
         "oAuthBrandDisplayName": "TentaPlugg Japanska",
-        "supportEmail": "wedbck@gmail.com"
+        "supportEmail": "wedbck@gmail.com",
+        "authorizedRedirectUris": ["https://tentaplugg-japanska-2026.web.app/__/auth/handler"]
       }
     }
+  },
+  "emulators": {
+    "auth": {
+      "port": 9099
+    },
+    "firestore": {
+      "port": 8080
+    },
+    "ui": {
+      "enabled": false
+    },
+    "singleProjectMode": true
   }
 }
