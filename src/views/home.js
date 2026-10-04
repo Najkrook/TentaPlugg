@@ -5,7 +5,8 @@ import { icon, dateText } from './shared.js';
 export function homeView(ctx) {
   const { state, now, plan } = ctx,
     p = ctx.progress(),
-    days = daysUntil(state.examDate, now);
+    days = daysUntil(state.examDate, now),
+    currentPref = state.preferredCount || 10;
   return html`<section class="page-heading">
       <div>
         <p class="overline">DITT STUDIERUM</p>
@@ -29,18 +30,86 @@ export function homeView(ctx) {
           <span lang="ja">は, が, に</span> eller <span lang="ja">で</span>? Ge partiklarna tio
           frågor.<br class="desktop" />Vi plockar upp det du behöver repetera.
         </p>
+        <div class="session-picker">
+          <span class="session-picker-label" id="session-size-label">Passets längd:</span>
+          <div
+            class="pill-group"
+            role="radiogroup"
+            aria-labelledby="session-size-label"
+            @keydown=${(e) => {
+              const options = [5, 10, 20];
+              if (p.due > 0) options.push('all');
+              const idx = options.indexOf(currentPref);
+              if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+                e.preventDefault();
+                const next = options[(idx + 1) % options.length];
+                ctx.setPreferredCount?.(next);
+              } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+                e.preventDefault();
+                const prev = options[(idx - 1 + options.length) % options.length];
+                ctx.setPreferredCount?.(prev);
+              }
+            }}
+          >
+            <button
+              type="button"
+              role="radio"
+              aria-checked=${currentPref === 5}
+              class="pill-btn ${currentPref === 5 ? 'active' : ''}"
+              @click=${() => ctx.setPreferredCount?.(5)}
+            >
+              5
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked=${currentPref === 10}
+              class="pill-btn ${currentPref === 10 ? 'active' : ''}"
+              @click=${() => ctx.setPreferredCount?.(10)}
+            >
+              10
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked=${currentPref === 20}
+              class="pill-btn ${currentPref === 20 ? 'active' : ''}"
+              @click=${() => ctx.setPreferredCount?.(20)}
+            >
+              20
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked=${currentPref === 'all'}
+              aria-disabled=${p.due === 0 ? 'true' : 'false'}
+              ?disabled=${p.due === 0}
+              class="pill-btn ${currentPref === 'all' ? 'active' : ''} ${p.due === 0 ? 'disabled' : ''}"
+              @click=${() => p.due > 0 && ctx.setPreferredCount?.('all')}
+              title=${p.due === 0 ? 'Inga frågor att repetera just nu' : `${p.due} frågor väntar på repetition`}
+            >
+              Alla förfallna (${p.due})
+            </button>
+          </div>
+        </div>
         <button class="primary" @click=${() => ctx.start('Partiklar')}>
           Träna partiklar ${icon('ChevronRight')}</button
-        ><span class="session-hint">10 frågor · cirka 5 minuter</span>
+        ><span class="session-hint"
+          >${currentPref === 5 ? '5 frågor · cirka 3 minuter' : currentPref === 20 ? '20 frågor · cirka 10 minuter' : currentPref === 'all' ? `${p.due} frågor · repetera allt förfallet` : '10 frågor · cirka 5 minuter'}</span
+        >
       </div>
-      <div class="particle-art" aria-hidden="true" lang="ja">
-        <div class="glyph small">を</div>
-        <div class="glyph mid">に</div>
-        <div class="glyph main">は</div>
-        <div class="glyph low">で</div>
-        <div class="glyph last">が</div>
-        <span>ひとつずつ、一歩ずつ。</span>
-      </div>
+      ${ctx.theme === 'sakura'
+        ? html`<div class="anime-figure anime-study-panel" aria-hidden="true">
+            <img src="/anime/study.jpg" alt="Sakura-maskot som studerar japanska" loading="lazy" />
+          </div>`
+        : html`<div class="particle-art" aria-hidden="true" lang="ja">
+            <div class="glyph small">を</div>
+            <div class="glyph mid">に</div>
+            <div class="glyph main">は</div>
+            <div class="glyph low">で</div>
+            <div class="glyph last">が</div>
+            <span>ひとつずつ、一歩ずつ。</span>
+          </div>`}
     </section>
     <div class="stats-strip">
       <div>

@@ -744,26 +744,32 @@ eq(
 examQuestions.forEach((q) => questions.push({ ...q, explanation: q.model }));
 export const guides = [
   {
+    id: 'wa-ga',
     title: 'は eller が?',
     text: 'は sätter ämnet: わたしは学生です。が markerar subjekt, ofta ny information: だれが来ますか。Vid 好き、嫌い、わかる markeras det man gillar, ogillar eller förstår ofta med が.',
   },
   {
+    id: 'ni-de',
     title: 'に eller で?',
     text: 'Handling på en plats → で: 図書館で読みます。Något finns på en plats → に: 図書館に本があります。Mål och klockslag tar ofta に: 学校に行きます。７時に起きます。',
   },
   {
+    id: 'wo-to-no-mo',
     title: 'を・と・の・も',
     text: 'を: direkt objekt, 本を読みます。と: tillsammans med eller uppräkning, 友だちと / パンと水。の: ägande eller nominal bestämning, 私の本。も: också, 私も学生です。',
   },
   {
+    id: 'no-particle',
     title: 'När behövs ingen partikel?',
     text: 'あした、きのう、まいにち tar normalt inte tidspartikeln に. Adverb som とても och たいてい behöver ingen extra partikel. I luckövningarna betyder × ”ingen partikel”.',
   },
   {
+    id: 'adjectives',
     title: 'I- och na-adjektiv',
     text: 'たかい → たかくない → たかかった → たかくなかった. いい böjs med よ: よかった. しずかです → しずかでした. Framför substantiv: たかい本 men しずかなまち.',
   },
   {
+    id: 'moras',
     title: 'Moror och stavelser',
     text: 'ん, っ och andra delen av en lång vokal är egna moror. きゃ är en mora. がっこう har fyra moror (が・っ・こ・う) men två stavelser. コーヒー har fyra moror och två stavelser.',
   },

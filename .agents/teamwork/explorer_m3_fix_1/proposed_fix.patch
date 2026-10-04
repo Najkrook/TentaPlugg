@@ -1,0 +1,38 @@
+--- a/src/style.css
++++ b/src/style.css
+@@ -1516,7 +1516,8 @@
+   .topbar {
+-    padding: 0 15px;
++    padding: 0 12px;
+   }
+-  .account span {
+-    max-width: 112px;
++  .account span,
++  .account span:not(.icon) {
++    max-width: 70px;
+   }
+   .exam-card > div {
+@@ -1753,3 +1754,3 @@
+   .account span:not(.icon) {
+-    max-width: 135px;
++    max-width: 90px;
+   }
+@@ -2824,4 +2825,18 @@
+   .topbar-actions {
+     gap: 8px;
+   }
++  .topbar-theme-toggle .theme-label {
++    display: none;
++  }
++  .topbar-theme-toggle {
++    padding: 6px 10px;
++    gap: 0;
++    min-height: 36px;
++    min-width: 36px;
++    justify-content: center;
++  }
++  .account span,
++  .account span:not(.icon) {
++    max-width: 90px;
++  }
+   .theme-toggle {

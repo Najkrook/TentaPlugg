@@ -22,7 +22,7 @@ import { ttsSupported, speak, stopSpeech } from './speech.js';
 import { homeView } from './views/home.js';
 import { examsView } from './views/exams.js';
 import { progressView } from './views/progress.js';
-import { guideView } from './views/guide.js';
+import { guideView, guideModalTemplate, resolveGuideId } from './views/guide.js';
 import { sessionView } from './views/session.js';
 import { icon, dateText } from './views/shared.js';
 const app = document.querySelector('#app');
@@ -56,6 +56,35 @@ function announce(text) {
     render();
   }, 6000);
 }
+function applyTheme(t) {
+  const effective = t === 'sakura' ? 'sakura' : 'classic';
+  state.theme = effective;
+  if (typeof document !== 'undefined') {
+    document.documentElement.dataset.theme = effective;
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) {
+      meta.setAttribute('content', effective === 'sakura' ? '#a82e66' : '#183f37');
+    }
+  }
+}
+function toggleTheme() {
+  const next = state.theme === 'sakura' ? 'classic' : 'sakura';
+  setTheme(next);
+}
+function setTheme(next) {
+  applyTheme(next);
+  if (typeof localStorage !== 'undefined') {
+    try {
+      localStorage.setItem('tentaplugg-theme', state.theme);
+    } catch {}
+  }
+  persist(false);
+  render();
+}
+try {
+  const storedTheme = typeof localStorage !== 'undefined' ? localStorage.getItem('tentaplugg-theme') : null;
+  applyTheme(storedTheme || state.theme || 'classic');
+} catch {}
 function setupLocal(uid) {
   blocked = false;
   try {
@@ -65,6 +94,15 @@ function setupLocal(uid) {
     blocked = true;
     message = error.message;
   }
+  try {
+    const savedTheme = localStorage.getItem('tentaplugg-theme');
+    if (savedTheme === 'sakura' || savedTheme === 'classic') {
+      state.theme = savedTheme;
+    } else if (!state.theme) {
+      state.theme = 'classic';
+    }
+  } catch {}
+  applyTheme(state.theme);
   const epoch = accountEpoch;
   saver = createLocalSaver({
     storage: localStorage,
@@ -122,22 +160,28 @@ function plan() {
   if (!existing) persist();
   return result;
 }
-function render(focus = false) {
-  if (composing) return;
-  const key = session ? `${session.attemptId}:${session.done ? 'result' : session.index}` : view;
-  if (key !== screenKey) {
-    stopSpeech();
-    screenKey = key;
-  }
-  const ctx = {
+function setPreferredCount(count) {
+  const valid = [5, 10, 20, 'all'];
+  if (!valid.includes(count)) return;
+  state.preferredCount = count;
+  state.settingsAt = Date.now();
+  persist(true);
+  render();
+}
+function getCtx() {
+  return {
     state,
     session,
     user,
+    theme: state.theme,
+    toggleTheme,
+    setTheme,
     now: Date.now(),
     plan: plan(),
     imageErrors,
     progress,
     tts: ttsSupported(),
+    setPreferredCount,
     start,
     startTask,
     startExam,
@@ -155,6 +199,7 @@ function render(focus = false) {
     reviewPending,
     changeDate,
     importGuest,
+    openGuideModal,
     imageError: (path) => {
       imageErrors.add(path);
       render();
@@ -164,6 +209,15 @@ function render(focus = false) {
     },
     speak: speakText,
   };
+}
+function render(focus = false) {
+  if (composing) return;
+  const key = session ? `${session.attemptId}:${session.done ? 'result' : session.index}` : view;
+  if (key !== screenKey) {
+    stopSpeech();
+    screenKey = key;
+  }
+  const ctx = getCtx();
   const body = session
     ? sessionView(ctx)
     : view === 'home'
@@ -189,6 +243,14 @@ function render(focus = false) {
           ${navs.map(([id, i, label]) => html`<button class="nav-item ${view === id ? 'active' : ''}" @click=${() => navigate(id)}>${icon(i)}<span>${label}</span></button>`)}
         </nav>
         <div class="side-bottom">
+          <button
+            type="button"
+            class="theme-toggle sidebar-theme-toggle"
+            @click=${toggleTheme}
+            aria-label=${state.theme === 'sakura' ? 'Växla till klassiskt tema' : 'Växla till Sakura Anime-tema'}
+          >
+            ${state.theme === 'sakura' ? html`🎓 Klassiskt tema` : html`🌸 Sakura Anime`}
+          </button>
           <div class="exam-note">
             ${icon('CalendarDays')}<span
               >Tentadatum<strong>${dateText(state.examDate)}</strong></span
@@ -202,11 +264,14 @@ function render(focus = false) {
         <header class="topbar">
           <span class="breadcrumb">Japanska för nybörjare <span>/</span> GEMA70</span
           ><span class="mobile-brand"><span lang="ja">学</span><b>TentaPlugg</b></span
-          ><button class="account" id="account" ?disabled=${authBusy} @click=${account}>
-            ${icon(user ? 'LogOut' : 'LogIn')}<span
-              >${authBusy ? 'Vänta…' : user ? `Logga ut · ${user.displayName?.split(' ')[0] || 'konto'}` : 'Logga in med Google'}</span
-            >
-          </button>
+          ><div class="topbar-actions">
+            <button class="topbar-theme-toggle" @click=${() => toggleTheme()} title="Växla tema (🌸 Sakura / 🎓 Klassisk)" aria-label="Växla tema"><span class="theme-icon" aria-hidden="true">${state.theme === 'sakura' ? '🌸' : '🎓'}</span><span class="theme-label">${state.theme === 'sakura' ? 'Sakura' : 'Klassisk'}</span></button>
+            <button class="account" id="account" ?disabled=${authBusy} @click=${account}>
+              ${icon(user ? 'LogOut' : 'LogIn')}<span
+                >${authBusy ? 'Vänta…' : user ? `Logga ut · ${user.displayName?.split(' ')[0] || 'konto'}` : 'Logga in med Google'}</span
+              >
+            </button>
+          </div>
         </header>
         <main id="main">${keyed(session?.attemptId || view, body)}</main>
         <footer><span id="cloud-status">${status}</span><span>GEMA70 · JAPC11</span></footer>
@@ -221,6 +286,74 @@ function render(focus = false) {
   if (focus) {
     document.querySelector('main h1')?.focus({ preventScroll: true });
     window.scrollTo(0, 0);
+  }
+}
+function openGuideModal(guideId = null) {
+  const previousActiveElement = document.activeElement;
+  let dialog = document.querySelector('dialog.guide-modal');
+  if (!dialog) {
+    dialog = document.createElement('dialog');
+    dialog.className = 'guide-modal';
+    dialog.setAttribute('aria-labelledby', 'guide-modal-title');
+    document.body.append(dialog);
+  }
+
+  const closeDialog = () => {
+    stopSpeech();
+    dialog.close();
+    dialog.remove();
+    if (previousActiveElement && typeof previousActiveElement.focus === 'function') {
+      previousActiveElement.focus();
+    }
+  };
+
+  renderTemplate(
+    guideModalTemplate(getCtx(), {
+      guideId,
+      onClose: closeDialog,
+    }),
+    dialog,
+  );
+
+  dialog.addEventListener(
+    'cancel',
+    (e) => {
+      e.preventDefault();
+      closeDialog();
+    },
+    { once: true },
+  );
+
+  dialog.addEventListener('click', (e) => {
+    if (e.target === dialog) {
+      const rect = dialog.getBoundingClientRect();
+      const isBackdrop =
+        e.clientX < rect.left ||
+        e.clientX > rect.right ||
+        e.clientY < rect.top ||
+        e.clientY > rect.bottom;
+      if (isBackdrop) {
+        closeDialog();
+      }
+    }
+  });
+
+  dialog.showModal();
+
+  const targetId = resolveGuideId(guideId);
+  if (targetId) {
+    requestAnimationFrame(() => {
+      const el = dialog.querySelector(
+        `#${targetId}, [data-guide-id="${targetId}"], #guide-${targetId}`,
+      );
+      const card = el ? (el.classList.contains('guide') ? el : el.closest('.guide') || el) : null;
+      if (card) {
+        card.classList.add('guide-highlight');
+        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        card.setAttribute('tabindex', '-1');
+        card.focus({ preventScroll: true });
+      }
+    });
   }
 }
 function ask(text, confirmLabel = 'Fortsätt') {
@@ -256,10 +389,20 @@ function navigate(id) {
   render(true);
 }
 async function start(topic, options = {}) {
-  let bank = questions;
-  if (options.wrong) bank = bank.filter((q) => state.stats[q.id] && !state.stats[q.id].ok);
-  if (options.dueOnly) bank = bank.filter((q) => state.stats[q.id]?.dueAt <= Date.now());
-  let ids = selectPractice(bank, state.stats, topic, 10, Date.now(), options);
+  const pref = state.preferredCount || 10;
+  const chosenCount = options.count !== undefined ? options.count : pref;
+  const isAllDue = chosenCount === 'all';
+  const dueOnly =
+    options.dueOnly !== undefined ? options.dueOnly : options.extra ? false : isAllDue;
+  const count = isAllDue ? Infinity : typeof chosenCount === 'number' ? chosenCount : 10;
+
+  let candidateBank = questions;
+  if (options.wrong)
+    candidateBank = candidateBank.filter((q) => state.stats[q.id] && !state.stats[q.id].ok);
+  let bank = dueOnly
+    ? candidateBank.filter((q) => state.stats[q.id]?.dueAt <= Date.now())
+    : candidateBank;
+  let ids = selectPractice(bank, state.stats, topic, count, Date.now(), options);
   if (!ids.length) {
     if (
       !options.extra &&
@@ -269,7 +412,14 @@ async function start(topic, options = {}) {
         'Träna extra',
       ))
     )
-      ids = selectPractice(bank, state.stats, topic, 10, Date.now(), { extra: true });
+      ids = selectPractice(
+        candidateBank,
+        state.stats,
+        topic,
+        typeof chosenCount === 'number' ? chosenCount : 10,
+        Date.now(),
+        { extra: true },
+      );
     else {
       announce('Inga frågor väntar på repetition i det här urvalet.');
       return;
@@ -369,13 +519,16 @@ function check() {
     announce('Modellösningen visas. Jämför och bedöm ditt svar.');
   } else grade(correct(q, session.answers[q.id]));
 }
-function grade(ok, advance = false) {
+function grade(okOrRating, advance = false) {
   const q = currentQ();
-  recordReview(state, session, q.id, ok, Date.now());
+  recordReview(state, session, q.id, okOrRating, Date.now());
   updateResult(state, session, questions, Date.now());
   persist(true);
   if (advance) next();
-  else announce(ok ? 'Rätt svar.' : 'Inte rätt denna gång. Förklaringen visas.');
+  else {
+    const isOk = typeof okOrRating === 'boolean' ? okOrRating : okOrRating !== 'again';
+    announce(isOk ? 'Rätt svar.' : 'Inte rätt denna gång. Förklaringen visas.');
+  }
 }
 function jump(index) {
   flush();
@@ -558,3 +711,41 @@ window.addEventListener('online', () => {
     sync?.flush();
   }
 });
+if (typeof window !== 'undefined') {
+  window.openGuideModal = openGuideModal;
+  window.addEventListener('open-guide-modal', (e) => {
+    openGuideModal(e.detail?.guideId);
+  });
+  window.addEventListener('keydown', (e) => {
+    if (!session || session.done || session.mode === 'exam') return;
+    if (composing || e.isComposing) return;
+
+    const active = document.activeElement;
+    const tag = active?.tagName;
+    const isEditable = (tag === 'INPUT' || tag === 'TEXTAREA') && !active.readOnly;
+    if (isEditable) return;
+
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (document.querySelector('dialog[open]')) return;
+
+    const q = currentQ();
+    if (!q) return;
+
+    const graded = typeof session.grades[q.id] === 'boolean';
+    const feedback =
+      (session.mode !== 'exam' && (graded || session.revealed?.[q.id])) || session.review;
+    if (!feedback) return;
+
+    const keyMap = {
+      1: 'again',
+      2: 'hard',
+      3: 'good',
+      4: 'easy',
+    };
+
+    if (keyMap[e.key]) {
+      e.preventDefault();
+      grade(keyMap[e.key], true);
+    }
+  });
+}

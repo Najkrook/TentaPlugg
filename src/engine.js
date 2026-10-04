@@ -24,15 +24,39 @@ export const fresh = () => ({
   plans: {},
   examDate: DEFAULT_EXAM_DATE,
   settingsAt: 0,
+  theme: 'classic',
+  preferredCount: 10,
 });
-export function nextStat(previous, ok, at, reviewId) {
+export function nextStat(previous, okOrRating, at, reviewId) {
   const day = dayKey(at);
   let box = previous?.box ?? 0,
     lastPromotionDay = previous?.lastPromotionDay ?? null,
     dueAt = previous?.dueAt ?? at;
-  if (!ok) {
+
+  let ok = false;
+  let rating = 'good';
+  if (typeof okOrRating === 'boolean') {
+    ok = okOrRating;
+    rating = ok ? 'good' : 'again';
+  } else if (typeof okOrRating === 'string') {
+    rating = okOrRating;
+    ok = rating !== 'again';
+  } else if (typeof okOrRating === 'object' && okOrRating !== null) {
+    rating = okOrRating.rating || (okOrRating.ok ? 'good' : 'again');
+    ok = rating !== 'again';
+  }
+
+  if (!ok || rating === 'again') {
     box = 0;
     dueAt = at + INTERVALS[0];
+  } else if (rating === 'hard') {
+    box = Math.max(0, box);
+    dueAt = at + Math.min(INTERVALS[box], 86400000);
+    lastPromotionDay = day;
+  } else if (rating === 'easy') {
+    box = Math.min(4, box + 2);
+    dueAt = at + INTERVALS[box];
+    lastPromotionDay = day;
   } else if ((!previous || dueAt <= at) && lastPromotionDay !== day) {
     box = Math.min(4, box + 1);
     dueAt = at + INTERVALS[box];
@@ -40,6 +64,7 @@ export function nextStat(previous, ok, at, reviewId) {
   }
   return {
     ok,
+    rating,
     at,
     attempts: (previous?.attempts || 0) + 1,
     box,
@@ -54,7 +79,7 @@ export function rebuildStats(state) {
   for (const r of Object.values(state.reviews).sort(
     (a, b) => a.at - b.at || a.id.localeCompare(b.id),
   ))
-    state.stats[r.questionId] = nextStat(state.stats[r.questionId], r.ok, r.at, r.id);
+    state.stats[r.questionId] = nextStat(state.stats[r.questionId], r.rating ?? r.ok, r.at, r.id);
   return state;
 }
 export function migrate(raw) {
@@ -180,21 +205,188 @@ export function importGuest(account, guest) {
   state.settingsAt = account.settingsAt;
   return state;
 }
-export function recordReview(state, session, questionId, ok, now) {
+export function recordReview(state, session, questionId, okOrRating, now) {
   const id = `${session.attemptId}:${questionId}`,
     existing = state.reviews[id];
+  const ok = typeof okOrRating === 'boolean' ? okOrRating : okOrRating !== 'again';
+  const rating = typeof okOrRating === 'string' ? okOrRating : ok ? 'good' : 'again';
   const alreadyLegacy = session.legacyGraded && typeof session.grades[questionId] === 'boolean';
   session.grades[questionId] = ok;
-  if (existing?.ok === ok || (alreadyLegacy && !existing)) return state;
+  if ((existing?.ok === ok && existing?.rating === rating) || (alreadyLegacy && !existing)) return state;
   state.reviews[id] = {
     id,
     questionId,
     attemptId: session.attemptId,
     ok,
+    rating,
     at: existing?.at ?? now,
     updatedAt: now,
   };
   return rebuildStats(state);
+}
+export function getContrastiveFeedback(q, userAnswer) {
+  if (!q || !userAnswer) return null;
+  const cleanAns = String(userAnswer).trim();
+  if (!cleanAns) return null;
+  if (correct(q, userAnswer)) return null;
+
+  if (q.contrastive && q.contrastive[cleanAns]) {
+    const val = q.contrastive[cleanAns];
+    if (typeof val === 'object' && val !== null) {
+      return {
+        text: val.text,
+        guideId: val.guideId || q.guideRef || 'ni-de',
+      };
+    }
+    return {
+      text: val,
+      guideId: q.guideRef || 'ni-de',
+    };
+  }
+
+  const hasAns = (ans) => (q.answers || []).some((a) => normalize(a) === normalize(ans));
+  const correctAns = normalize(q.answers?.[0] || '');
+
+  // Common particle rules for Japanese
+  if (q.topic === 'Partiklar' || q.choices?.includes('は')) {
+    if (cleanAns === 'で' && (hasAns('に') || hasAns('へ'))) {
+      return {
+        text: 'Du valde で. で används för platsen där en aktiv handling sker (t.ex. 本を読みます), medan に här anger plats för existens (あります/います), mål för förflyttning, eller personen man träffar.',
+        guideId: 'ni-de',
+      };
+    }
+    if (cleanAns === 'に' && hasAns('で')) {
+      return {
+        text: 'Du valde に. に anger riktning, bestämd tidpunkt eller existens (あります/います), medan で markerar platsen där en handling eller aktivitet faktiskt utförs.',
+        guideId: 'ni-de',
+      };
+    }
+    if (cleanAns === 'へ' && hasAns('で')) {
+      return {
+        text: 'Du valde へ. へ anger riktning mot ett mål, medan で markerar platsen där handlingen utförs.',
+        guideId: 'ni-de',
+      };
+    }
+    if (cleanAns === 'は' && hasAns('が')) {
+      return {
+        text: 'Du valde は. は sätter meningens övergripande tema (vad satsen handlar om), medan が här markerar objektet vid 好き/嫌い/わかります, eller lyfter fram subjektet som ny information.',
+        guideId: 'wa-ga',
+      };
+    }
+    if (cleanAns === 'が' && hasAns('は')) {
+      return {
+        text: 'Du valde が. が används för ny information eller vid verb som 分かる/好き, men här etableras ett övergripande tema för hela satsen med は.',
+        guideId: 'wa-ga',
+      };
+    }
+    if (cleanAns === 'を' && hasAns('が')) {
+      return {
+        text: 'Du valde を. を markerar direkt objekt vid transitiva handlingar (t.ex. 食べます), men vid 好き (tycka om) och わかります (förstå) används partikeln が i japanska.',
+        guideId: 'wa-ga',
+      };
+    }
+    if (cleanAns === 'が' && hasAns('を')) {
+      return {
+        text: 'Du valde が. が markerar grammatiskt subjekt eller komplement vid verb som 分かる/好き, medan transitiva handlingar tar partikeln を för det direkta objektet.',
+        guideId: 'wa-ga',
+      };
+    }
+    if (cleanAns === 'を' && hasAns('に')) {
+      return {
+        text: 'Du valde を. を markerar direkt objekt, men vid transportmedel (som バスに乗ります) eller personen man träffar eller frågar används partikeln に.',
+        guideId: 'wo-to-no-mo',
+      };
+    }
+    if (cleanAns === 'に' && hasAns('を')) {
+      return {
+        text: 'Du valde に. に anger destination, tidpunkt eller mottagare, medan det direkta objektet som påverkas av en handling markeras med を.',
+        guideId: 'wo-to-no-mo',
+      };
+    }
+    if (cleanAns === 'で' && hasAns('を')) {
+      return {
+        text: 'Du valde で. で anger medel, verktyg eller handlingsplats, medan transitiva verb tar を för objektet som handlingen påverkar.',
+        guideId: 'wo-to-no-mo',
+      };
+    }
+    if (cleanAns === 'を' && hasAns('で')) {
+      return {
+        text: 'Du valde を. を markerar direkt objekt, men när ett språk, verktyg eller medel används (t.ex. 日本語で) används partikeln で.',
+        guideId: 'ni-de',
+      };
+    }
+    if (cleanAns === 'と' && hasAns('の')) {
+      return {
+        text: 'Du valde と. と betyder ”tillsammans med” eller binder ihop sidoordnade substantiv (”och”), medan の knyter ihop substantiv där det ena beskriver eller äger det andra.',
+        guideId: 'wo-to-no-mo',
+      };
+    }
+    if (cleanAns === 'の' && hasAns('と')) {
+      return {
+        text: 'Du valde の. の anger ägande eller bestämning (”Xs Y”), medan と binder samman två separata substantiv (”X och Y”) eller anger sällskap.',
+        guideId: 'wo-to-no-mo',
+      };
+    }
+    if (cleanAns === 'は' && hasAns('の')) {
+      return {
+        text: 'Du valde は. は gör ordet till tema för hela satsen, medan の binder ihop två substantiv för att visa ägande eller tillhörighet (Xs Y).',
+        guideId: 'wo-to-no-mo',
+      };
+    }
+    if (cleanAns === 'の' && hasAns('は')) {
+      return {
+        text: 'Du valde の. の binder ihop två substantiv, medan は presenterar satsens övergripande tema eller ämne.',
+        guideId: 'wa-ga',
+      };
+    }
+    if (cleanAns === 'は' && hasAns('も')) {
+      return {
+        text: 'Du valde は. は sätter meningens normala tema, men när man vill uttrycka ”också/även” (som i ”jag också”) ersätts は med partikeln も.',
+        guideId: 'wo-to-no-mo',
+      };
+    }
+    if (cleanAns === 'も' && hasAns('は')) {
+      return {
+        text: 'Du valde も. も betyder ”också/även” och förutsätter att samma sak redan sagts om någon annan, medan は är standardmarkören för meningens ämne.',
+        guideId: 'wo-to-no-mo',
+      };
+    }
+    if (cleanAns === 'に' && hasAns('と')) {
+      return {
+        text: 'Du valde に. に anger riktning, tid eller existens, medan sällskap (”tillsammans med”) uttrycks med と.',
+        guideId: 'wo-to-no-mo',
+      };
+    }
+    if (['に', 'で', 'は', 'が', 'を', 'へ'].includes(cleanAns) && hasAns('×')) {
+      return {
+        text: `Du valde ${cleanAns}. Relativa tidsord (あした, きのう, まいにち), adverb (とても, たいてい) och räkneord tar normalt ingen partikel (markeras med ×).`,
+        guideId: 'no-particle',
+      };
+    }
+    if (cleanAns === '×' && ['に', 'で', 'を', 'は', 'が', 'と', 'の', 'へ', 'も'].some(hasAns)) {
+      const needed = (q.answers || []).map(normalize).find((a) => ['に', 'で', 'を', 'は', 'が', 'と', 'の', 'へ', 'も'].includes(a)) || correctAns;
+      return {
+        text: `Du valde × (ingen partikel). Här behövs partikeln ${needed} för att binda samman orden och klargöra satsens grammatiska relation.`,
+        guideId: ['に', 'で', 'へ'].includes(needed) ? 'ni-de' : ['は', 'が'].includes(needed) ? 'wa-ga' : 'wo-to-no-mo',
+      };
+    }
+  }
+
+  if (q.topic === 'Böjningar') {
+    return {
+      text: 'Kontrollera stammen och böjningsmönstret för ordklassen (i-adjektiv böjs med ～かった, na-adjektiv och substantiv med ～でした).',
+      guideId: 'adjectives',
+    };
+  }
+
+  if (q.topic === 'Moror & stavelser') {
+    return {
+      text: 'Kom ihåg att ん, っ och förlängda vokaler räknas som egna moror, men bildar stavelser tillsammans med föregående vokal.',
+      guideId: 'moras',
+    };
+  }
+
+  return null;
 }
 function hash(value) {
   let n = 0;
