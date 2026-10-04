@@ -1,0 +1,1 @@
+{"name":"tentaplugg-japanska","version":"1.0.0","private":true,"type":"module","scripts":{"dev":"vite --host 127.0.0.1","build":"vite build","test":"node --test tests/*.test.js","preview":"vite preview --host 127.0.0.1"},"dependencies":{"firebase":"^12.0.0","lucide":"^0.468.0"},"devDependencies":{"firebase-tools":"^15.32.1","vite":"^7.0.0"},"overrides":{"@grpc/grpc-js":"1.13.6"}}
