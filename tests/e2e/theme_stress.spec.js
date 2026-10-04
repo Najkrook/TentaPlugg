@@ -24,8 +24,8 @@ test.describe('Milestone M3: Theme Switching & Persistence Stress Tests', () => 
 
       const domTheme = await page.evaluate(() => document.documentElement.dataset.theme);
       const storedTheme = await page.evaluate(() => localStorage.getItem('tentaplugg-theme'));
-      const metaColor = await page.evaluate(
-        () => document.querySelector('meta[name="theme-color"]')?.getAttribute('content'),
+      const metaColor = await page.evaluate(() =>
+        document.querySelector('meta[name="theme-color"]')?.getAttribute('content'),
       );
 
       expect(domTheme).toBe(expectedTheme);
@@ -112,8 +112,8 @@ test.describe('Milestone M3: Theme Switching & Persistence Stress Tests', () => 
       await expect(page).toHaveTitle(/TentaPlugg/);
 
       const domTheme = await page.evaluate(() => document.documentElement.dataset.theme);
-      const metaColor = await page.evaluate(
-        () => document.querySelector('meta[name="theme-color"]')?.getAttribute('content'),
+      const metaColor = await page.evaluate(() =>
+        document.querySelector('meta[name="theme-color"]')?.getAttribute('content'),
       );
 
       expect(domTheme, `Theme for ${desc}`).toBe(expected);
@@ -185,8 +185,8 @@ test.describe('Milestone M3: Theme Switching & Persistence Stress Tests', () => 
     // Verify study image loads with non-zero dimensions
     const studyImg = page.locator('.anime-study-panel img');
     await expect(studyImg).toBeVisible();
-    const naturalWidth = await studyImg.evaluate((img) => img.naturalWidth);
-    expect(naturalWidth).toBeGreaterThan(0);
+    await studyImg.scrollIntoViewIfNeeded();
+    await expect.poll(() => studyImg.evaluate((img) => img.naturalWidth)).toBeGreaterThan(0);
 
     // 3. Test Practice Session Feedback Mascot in Sakura mode
     // Click on 'い Böjningar' topic (auto-graded question bank)
@@ -207,8 +207,8 @@ test.describe('Milestone M3: Theme Switching & Persistence Stress Tests', () => 
     // In Sakura mode, .anime-feedback-mascot must be visible in feedback panel
     const mascot = page.locator('.anime-feedback-mascot img');
     await expect(mascot).toBeVisible();
-    const mascotWidth = await mascot.evaluate((img) => img.naturalWidth);
-    expect(mascotWidth).toBeGreaterThan(0);
+    await mascot.scrollIntoViewIfNeeded();
+    await expect.poll(() => mascot.evaluate((img) => img.naturalWidth)).toBeGreaterThan(0);
 
     // 4. Switch back to Classic mode while on practice feedback screen
     await page.locator('.topbar-theme-toggle').click();

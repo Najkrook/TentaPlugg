@@ -1,6 +1,16 @@
 import { test, expect } from '@playwright/test';
 import { questions } from '../../src/data.js';
 
+async function checkCurrentAnswer(page) {
+  if (await page.locator('.particle-panel').count()) {
+    await page.getByRole('button', { name: 'Rätta', exact: true }).click();
+    await page.getByRole('button', { name: 'Till steg 2', exact: true }).click();
+    await page.getByRole('button', { name: 'Rätta meningen', exact: true }).click();
+  } else {
+    await page.getByRole('button', { name: /^(Kontrollera svar|Visa modellösning)$/ }).click();
+  }
+}
+
 test.describe('Quick Guide Modal Empirical Stress Suite', () => {
   test.beforeEach(async ({ page }) => {
     // Clear storage before each test to start from a clean state
@@ -49,8 +59,7 @@ test.describe('Quick Guide Modal Empirical Stress Suite', () => {
           }
         }
       }
-      const checkBtn = page.getByRole('button', { name: /^(Kontrollera svar|Visa modellösning)$/ });
-      await checkBtn.click();
+      await checkCurrentAnswer(page);
     };
 
     // Helper to advance to the next question
@@ -404,11 +413,11 @@ test.describe('Quick Guide Modal Empirical Stress Suite', () => {
         } else {
           await choices.first().click();
         }
-      } else {
+      } else if (await page.locator('#answer').count()) {
         await page.locator('#answer').fill('に');
       }
 
-      await page.getByRole('button', { name: /^(Kontrollera svar|Visa modellösning)$/ }).click();
+      await checkCurrentAnswer(page);
 
       // Check if contrastive callout appeared
       const callout = page.locator('.contrastive-callout');
@@ -419,7 +428,7 @@ test.describe('Quick Guide Modal Empirical Stress Suite', () => {
 
           // Verify contrastive chip contents
           await expect(callout).toContainText('Ditt val:');
-          await expect(callout).toContainText('Rätt:');
+          await expect(callout).toContainText('Godtagna svar:');
 
           // Verify BookOpen SVG icon inside button
           await expect(openGuideBtn.locator('svg')).toBeVisible();

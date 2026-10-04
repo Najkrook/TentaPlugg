@@ -17,6 +17,9 @@ Om Windows-sandlådan blockerar testprocesser: `node --test --test-isolation=non
 
 - Tre tentor med samtliga uppgifter, uppdelade i 138 delfrågor.
 - 27 partikelluckor med originalfacit från Lesson5, dess sex bedömningsövningar och kompletterande övningar.
+- I nya träningspass har de sex meningsövningarna två steg: markera partiklar och rätta markeringarna, sedan byta, flytta, lägga till eller ta bort partiklar direkt i meningen. Klockslagsövningen är bearbetad till ett tydligt partikelfel. Originalmaterialet är kvar.
+- Båda stegen sparas och visas separat. Det automatiska resultatet kräver rätt i båda stegen; självskattningen kan därefter justera repetitionsbedömningen. Luckövningar och tentaläge behåller sina tidigare flöden.
+- Nya sessioner använder `exerciseVersion: 1` och sparar interaktionen i `particles`, medan `answers` fortsatt innehåller text. Äldre sessioner utan denna version behåller originalfrågorna och fritextflödet. Frågevarianter och partikelpositioner finns i `src/particles.js`.
 - Originalbilder/PDF:er finns i `public/material`. Modellsvar finns i `src/data.js`.
 - Automatisk rättning av entydiga svar; självrättning för resonemang, fria meningar och terminologiskt tvetydiga frågor.
 - Varje tenta summerar till 100 övningspoäng. Läsprovets II.1 har tilldelats 10 poäng för att summera till 100; poäng står inte utsatta där i originalet. Självbedömning ger allt eller inget per delfråga och reproducerar inte en lärares partiella poängsättning.

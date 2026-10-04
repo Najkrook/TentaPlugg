@@ -1,5 +1,6 @@
 import { EXERCISE_REFERENCE_DATE } from './config.js';
 import { extraQuestions } from './extra-content.js';
+import { enrichQuestion } from './pedagogy.js';
 export const topics = [
   'Partiklar',
   'Böjningar',
@@ -25,7 +26,7 @@ const lesson = [
   [
     'しゅうまつひとりで【　】うみでおよぎました。',
     '×',
-    'Efter tidsuttrycket しゅうまつ behövs ingen partikel här.',
+    'Luckan står efter ひとりで (ensam). Uttrycket har redan で och behöver ingen extra partikel. うみで anger sedan var simningen sker.',
   ],
   [
     'しゅうまつひとりでうみ【　】およぎました。',
@@ -185,23 +186,47 @@ lesson.forEach(([p, a, e], i) =>
 );
 [
   ['たかい → artig dåtid', 'たかかったです', 'Ta bort い och lägg till かったです.'],
-  ['たかい → artig negation', 'たかくないです', 'Ta bort い och lägg till くないです.'],
-  ['たかい → artig negativ dåtid', 'たかくなかったです', 'くない blir くなかった i dåtid.'],
-  ['いい → artig dåtid', 'よかったです', 'いい böjs från stammen よい.'],
-  ['いい → artig negation', 'よくないです', 'Oregelbundet: använd よく.'],
-  ['しずか → artig dåtid', 'しずかでした', 'Na-adjektiv använder でした.'],
+  [
+    'たかい → artig negation',
+    ['たかくないです', 'たかくありません'],
+    'Ta bort sista い: たかい → たか. Lägg till くないです eller くありません. Båda uttrycker artig negation utan dåtid.',
+  ],
+  [
+    'たかい → artig negativ dåtid',
+    ['たかくなかったです', 'たかくありませんでした'],
+    'Börja med negationen たかくない och böj ない till なかった: たかくなかったです. Även たかくありませんでした är artig negativ dåtid.',
+  ],
+  [
+    'いい → artig dåtid',
+    'よかったです',
+    'いい böjs oregelbundet från よい. Ta bort sista い och lägg till かったです: よい → よかったです. Skriv alltså inte いいでした.',
+  ],
+  [
+    'いい → artig negation',
+    ['よくないです', 'よくありません'],
+    'いい är oregelbundet och böjs från よい: よい → よくないです eller よくありません. Behåll alltså inte いい framför negationsändelsen.',
+  ],
+  [
+    'しずか → artig dåtid',
+    'しずかでした',
+    'しずか är ett na-adjektiv. Behåll ordet och byt kopulan です mot dåtidsformen でした: しずかです → しずかでした.',
+  ],
   [
     'しずか → artig negation',
-    ['しずかじゃないです', 'しずかではありません', 'しずかじゃありません'],
-    'Na-adjektiv negeras via kopulan.',
+    ['しずかじゃないです', 'しずかではないです', 'しずかではありません', 'しずかじゃありません'],
+    'しずか är ett na-adjektiv. Behåll しずか och byt です mot じゃないです eller ではありません. Även ではないです och じゃありません fungerar. Använd inte i-adjektivens くない direkt efter しずか.',
   ],
   ['En lugn stad: しずか【　】まち', 'な', 'Na-adjektiv får な framför substantiv.'],
   ['En dyr bok: たかい【　】本', '×', 'I-adjektiv står direkt framför substantiv.'],
-  ['たべます → artig dåtid', 'たべました', 'ます blir ました.'],
+  [
+    'たべます → artig dåtid',
+    'たべました',
+    'Behåll verbstammen たべ och byt ます mot ました: たべます → たべました. Det ger artig dåtid utan negation.',
+  ],
   [
     'いきます → artig negativ dåtid',
     'いきませんでした',
-    'ませんでした uttrycker artig negation i dåtid.',
+    'Behåll verbstammen いき och byt ます mot ませんでした: いきませんでした. ません står för negation och でした för dåtid; いきました skulle sakna negationen.',
   ],
   ['Föreslå: ”Vi äter!”', ['たべましょう', '食べましょう'], 'Verbstam + ましょう är ett förslag.'],
   [
@@ -565,7 +590,7 @@ eq(
     'japc11',
     '5.1-' + (i + 1),
     7,
-    `Antal stavelser och moror i ${p}? Skriv 2, 3.`,
+    `Antal stavelser och moror i ${p}? Skriv stavelser, moror (t.ex. 2, 3).`,
     `Svar: ${a}. Räkna långa vokaler, ん och っ som extra moror, men inte extra stavelser.`,
     { self: false, answers: [a, a.replace(', ', '/')], points: 2 },
   ),
@@ -751,12 +776,12 @@ export const guides = [
   {
     id: 'ni-de',
     title: 'に eller で?',
-    text: 'Handling på en plats → で: 図書館で読みます。Något finns på en plats → に: 図書館に本があります。Mål och klockslag tar ofta に: 学校に行きます。７時に起きます。',
+    text: 'Handling på en plats → で: 図書館で読みます。Medel tar också で: 日本語で書きます (på japanska), バスで行きます (med buss). Något finns på en plats → に: 図書館に本があります。Mål och klockslag tar ofta に: 学校に行きます。７時に起きます。に används även för personen man träffar (友だちに会います) och fordonet man stiger på (バスに乗ります).',
   },
   {
     id: 'wo-to-no-mo',
     title: 'を・と・の・も',
-    text: 'を: direkt objekt, 本を読みます。と: tillsammans med eller uppräkning, 友だちと / パンと水。の: ägande eller nominal bestämning, 私の本。も: också, 私も学生です。',
+    text: 'を: direkt objekt, 本を読みます。と: tillsammans med eller uppräkning, 友だちと / パンと水。と markerar också citat: 「ありがとう」と言います。の: ägande eller nominal bestämning, 私の本。も: också, 私も学生です。',
   },
   {
     id: 'no-particle',
@@ -772,6 +797,16 @@ export const guides = [
     id: 'moras',
     title: 'Moror och stavelser',
     text: 'ん, っ och andra delen av en lång vokal är egna moror. きゃ är en mora. がっこう har fyra moror (が・っ・こ・う) men två stavelser. コーヒー har fyra moror och två stavelser.',
+  },
+  {
+    id: 'verbs',
+    title: 'Artiga verbformer',
+    text: 'Utgå från formen med ます: たべます → たべました (dåtid), たべません (negation), たべませんでした (negativ dåtid). Byt ます mot ましょう för förslag: たべましょう. Med か kan du erbjuda hjälp: てつだいましょうか.',
+  },
+  {
+    id: 'questions',
+    title: 'Frågepartikeln か',
+    text: 'か efter ett artigt yttrande gör det till en fråga: これは本です → これは本ですか。Jämför よ, som framhäver en upplysning för lyssnaren.',
   },
 ];
 
@@ -792,6 +827,7 @@ for (const q of questions) {
           : 'sv';
   if (q.exam === 'reading' && (/^reading-III/.test(q.id) || /^reading-II\.2-[1-4]$/.test(q.id)))
     q.answerLang = 'ja';
+  enrichQuestion(q);
   q.choiceLang ||= q.choices?.some((a) => /[ぁ-ヿ一-龯]/.test(a))
     ? 'ja'
     : q.choices?.includes('Noun') || q.choices?.includes('Topic')

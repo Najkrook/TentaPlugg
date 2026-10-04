@@ -5,6 +5,11 @@ import { fresh, nextStat } from '../../src/engine.js';
 const storageKey = 'tentaplugg-v1-guest';
 
 async function fillAnyAnswer(page) {
+  if (await page.locator('.particle-panel').count()) {
+    await page.getByRole('button', { name: 'Rätta', exact: true }).click();
+    await page.getByRole('button', { name: 'Till steg 2', exact: true }).click();
+    return;
+  }
   const choices = page.locator('.choice');
   if (await choices.count()) {
     await choices.first().click();
@@ -105,7 +110,9 @@ test.describe('Session Sizing & Practice Flow Empirical Stress Suite', () => {
       await fillAnyAnswer(page);
 
       // Check answer
-      await page.getByRole('button', { name: /^(Kontrollera svar|Visa modellösning)$/ }).click();
+      await page
+        .getByRole('button', { name: /^(Kontrollera svar|Visa modellösning|Rätta meningen)$/ })
+        .click();
 
       // Rating buttons must appear
       const ratingGroup = page.locator('.rating-group');
@@ -181,7 +188,7 @@ test.describe('Session Sizing & Practice Flow Empirical Stress Suite', () => {
         box: 1,
         ok: true,
         rating: 'good',
-        dueAt: now - (60000 * (i + 1)), // In the past -> due
+        dueAt: now - 60000 * (i + 1), // In the past -> due
         at: now - 86400000,
         attempts: 1,
       };
@@ -192,7 +199,7 @@ test.describe('Session Sizing & Practice Flow Empirical Stress Suite', () => {
         box: 2,
         ok: true,
         rating: 'good',
-        dueAt: now + (86400000 * (i + 1)), // In the future -> not due
+        dueAt: now + 86400000 * (i + 1), // In the future -> not due
         at: now - 10000,
         attempts: 1,
       };
@@ -239,7 +246,9 @@ test.describe('Session Sizing & Practice Flow Empirical Stress Suite', () => {
 
     // Question 1: Check answer and press shortcut '1' (again)
     await fillAnyAnswer(page);
-    await page.getByRole('button', { name: /^(Kontrollera svar|Visa modellösning)$/ }).click();
+    await page
+      .getByRole('button', { name: /^(Kontrollera svar|Visa modellösning|Rätta meningen)$/ })
+      .click();
     await expect(page.locator('.rating-group')).toBeVisible();
     await page.keyboard.press('1');
 
@@ -248,7 +257,9 @@ test.describe('Session Sizing & Practice Flow Empirical Stress Suite', () => {
 
     // Question 2: Check answer and press shortcut '2' (hard)
     await fillAnyAnswer(page);
-    await page.getByRole('button', { name: /^(Kontrollera svar|Visa modellösning)$/ }).click();
+    await page
+      .getByRole('button', { name: /^(Kontrollera svar|Visa modellösning|Rätta meningen)$/ })
+      .click();
     await expect(page.locator('.rating-group')).toBeVisible();
     await page.keyboard.press('2');
 
@@ -257,7 +268,9 @@ test.describe('Session Sizing & Practice Flow Empirical Stress Suite', () => {
 
     // Question 3: Check answer and press shortcut '4' (easy)
     await fillAnyAnswer(page);
-    await page.getByRole('button', { name: /^(Kontrollera svar|Visa modellösning)$/ }).click();
+    await page
+      .getByRole('button', { name: /^(Kontrollera svar|Visa modellösning|Rätta meningen)$/ })
+      .click();
     await expect(page.locator('.rating-group')).toBeVisible();
     await page.keyboard.press('4');
 

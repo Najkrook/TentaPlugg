@@ -25,17 +25,25 @@ test('Session Sizing: strictly honors counts 5, 10, 20 and all due questions on 
   const freshStats = {};
   for (const count of [5, 10, 20]) {
     const ids = selectPractice(particleQuestions, freshStats, 'Partiklar', count, now);
-    assert.equal(ids.length, count, `Fresh state: selecting ${count} must yield exactly ${count} items`);
-    assert.equal(new Set(ids).size, count, `Fresh state: selecting ${count} must have no duplicates`);
+    assert.equal(
+      ids.length,
+      count,
+      `Fresh state: selecting ${count} must yield exactly ${count} items`,
+    );
+    assert.equal(
+      new Set(ids).size,
+      count,
+      `Fresh state: selecting ${count} must have no duplicates`,
+    );
   }
 
   // Case 2: Partial state where 7 questions are due, 10 are future, rest unseen
   const stats = {};
   particleQuestions.slice(0, 7).forEach((q, i) => {
-    stats[q.id] = { dueAt: now - (1000 * (i + 1)), ok: true, box: 1 };
+    stats[q.id] = { dueAt: now - 1000 * (i + 1), ok: true, box: 1 };
   });
   particleQuestions.slice(7, 17).forEach((q, i) => {
-    stats[q.id] = { dueAt: now + (86400000 * (i + 1)), ok: true, box: 2 };
+    stats[q.id] = { dueAt: now + 86400000 * (i + 1), ok: true, box: 2 };
   });
 
   // Count 5: Should select exactly 5 due items (the 5 most urgent)
@@ -94,7 +102,10 @@ test('Session Sizing: Generative fuzz testing across arbitrary bank sizes and du
     for (const requestedCount of [5, 10, 20, Infinity]) {
       // 1. Without dueOnly (eligible = due + unseen)
       const eligibleTotal = dueCount + unseenCount;
-      const expectedCount = Math.min(requestedCount === Infinity ? eligibleTotal : requestedCount, eligibleTotal);
+      const expectedCount = Math.min(
+        requestedCount === Infinity ? eligibleTotal : requestedCount,
+        eligibleTotal,
+      );
       const res = selectPractice(mockBank, mockStats, 'TestTopic', requestedCount, now);
 
       assert.equal(
@@ -114,7 +125,10 @@ test('Session Sizing: Generative fuzz testing across arbitrary bank sizes and du
 
       // 2. With dueOnly (bank filtered to due only)
       const dueOnlyBank = mockBank.filter((q) => mockStats[q.id]?.dueAt <= now);
-      const expectedDueCount = Math.min(requestedCount === Infinity ? dueCount : requestedCount, dueCount);
+      const expectedDueCount = Math.min(
+        requestedCount === Infinity ? dueCount : requestedCount,
+        dueCount,
+      );
       const resDue = selectPractice(dueOnlyBank, mockStats, 'TestTopic', requestedCount, now);
 
       assert.equal(
@@ -142,19 +156,34 @@ test('Practice Session Flow: 20-question session with diverse self-ratings and s
 
   // Distribution of 20 ratings: 5 'again', 5 'hard', 5 'good', 5 'easy'
   const ratingSequence = [
-    'again', 'good', 'hard', 'easy',
-    'easy', 'again', 'good', 'hard',
-    'hard', 'again', 'easy', 'good',
-    'good', 'hard', 'again', 'easy',
-    'easy', 'again', 'good', 'hard',
+    'again',
+    'good',
+    'hard',
+    'easy',
+    'easy',
+    'again',
+    'good',
+    'hard',
+    'hard',
+    'again',
+    'easy',
+    'good',
+    'good',
+    'hard',
+    'again',
+    'easy',
+    'easy',
+    'again',
+    'good',
+    'hard',
   ];
   assert.equal(ratingSequence.length, 20);
 
   // Expected counts:
   const countAgain = ratingSequence.filter((r) => r === 'again').length; // 5
-  const countHard = ratingSequence.filter((r) => r === 'hard').length;   // 5
-  const countGood = ratingSequence.filter((r) => r === 'good').length;   // 5
-  const countEasy = ratingSequence.filter((r) => r === 'easy').length;   // 5
+  const countHard = ratingSequence.filter((r) => r === 'hard').length; // 5
+  const countGood = ratingSequence.filter((r) => r === 'good').length; // 5
+  const countEasy = ratingSequence.filter((r) => r === 'easy').length; // 5
   const expectedOk = countHard + countGood + countEasy; // 15
   const expectedFail = countAgain; // 5
 

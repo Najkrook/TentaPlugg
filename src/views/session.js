@@ -2,29 +2,30 @@ import { html } from 'lit-html';
 import { keyed } from 'lit-html/directives/keyed.js';
 import { live } from 'lit-html/directives/live.js';
 import { questions } from '../data.js';
-import { scoreAttempt, getContrastiveFeedback } from '../engine.js';
+import { scoreAttempt, getContrastiveFeedback, getLearningTip, previewReview } from '../engine.js';
 import { promptSpeech, answerSpeech, japaneseText } from '../speech.js';
 import { icon, languageText, speechButton } from './shared.js';
-import { INTERVALS } from '../config.js';
+import { questionForSession } from '../particles.js';
+import { particleSessionView } from './particles.js';
 
 export function formatInterval(ms) {
+  if (ms <= 0) return 'Nu';
   if (ms < 3600000) return `${Math.round(ms / 60000)}m`;
   if (ms < 86400000) return `${Math.round(ms / 3600000)}h`;
   return `${Math.round(ms / 86400000)}d`;
 }
 
-export function previewRatingInterval(box, rating) {
-  const b = typeof box === 'number' && box >= 0 ? box : 0;
-  if (rating === 'again') return formatInterval(INTERVALS[0]);
-  if (rating === 'hard') return formatInterval(Math.min(INTERVALS[Math.min(4, b)], 86400000));
-  if (rating === 'easy') return formatInterval(INTERVALS[Math.min(4, b + 2)]);
-  return formatInterval(INTERVALS[Math.min(4, b + 1)]); // good
+export function previewRatingInterval(state, session, questionId, rating, now) {
+  return formatInterval(previewReview(state, session, questionId, rating, now).dueAt - now);
 }
 
 export function sessionView(ctx) {
   const s = ctx.session;
   if (s.done) return resultView(ctx);
-  const q = questions.find((q) => q.id === s.ids[s.index]);
+  const q = questionForSession(
+    questions.find((q) => q.id === s.ids[s.index]),
+    s,
+  );
   if (!q)
     return html`<h1 tabindex="-1">Frågan finns inte längre.</h1>
       <button @click=${ctx.exit}>Tillbaka</button>`;
@@ -34,6 +35,8 @@ export function sessionView(ctx) {
     s.startBox[q.id] = ctx.state.stats[q.id]?.box ?? 0;
   }
   const currentBox = s.startBox[q.id] ?? ctx.state.stats[q.id]?.box ?? 0;
+  if (q.type === 'particle-edit')
+    return particleSessionView(ctx, q, () => ratingButtonsTemplate(ctx, q, currentBox));
   const value = s.answers[q.id] || '',
     graded = typeof s.grades[q.id] === 'boolean';
   const feedback = (s.mode !== 'exam' && (graded || s.revealed?.[q.id])) || s.review;
@@ -113,21 +116,48 @@ export function sessionView(ctx) {
         ${
           feedback
             ? html`<div class="feedback ${q.self ? 'neutral' : s.grades[q.id] ? 'good' : 'again'}">
-                ${ctx.theme === 'sakura' && (!q.self || typeof s.grades[q.id] === 'boolean')
-                  ? html`<div class="anime-figure anime-feedback-mascot ${s.grades[q.id] ? 'good' : 'again'}" aria-hidden="true">
-                      <img
-                        src="${s.grades[q.id] ? '/anime/cheer.jpg' : '/anime/encourage.jpg'}"
-                        alt="${s.grades[q.id] ? 'やった！ Bra jobbat!' : 'がんばって！ Kämpa vidare!'}"
-                        loading="lazy"
-                      />
-                    </div>`
-                  : ''}
+                ${
+                  ctx.theme === 'sakura' && (!q.self || typeof s.grades[q.id] === 'boolean')
+                    ? html`<div
+                        class="anime-figure anime-feedback-mascot ${s.grades[q.id] ? 'good' : 'again'}"
+                        aria-hidden="true"
+                      >
+                        <img
+                          src="${s.grades[q.id] ? '/anime/cheer.jpg' : '/anime/encourage.jpg'}"
+                          alt="${s.grades[q.id] ? 'やった！ Bra jobbat!' : 'がんばって！ Kämpa vidare!'}"
+                          loading="lazy"
+                        />
+                      </div>`
+                    : ''
+                }
                 <h3>
-                  ${q.self ? 'Jämför med modellösningen' : s.grades[q.id] ? 'Rätt svar!' : 'Titta på förklaringen och försök igen senare'}
+                  ${q.self ? 'Jämför med modellösningen' : s.grades[q.id] ? 'Rätt svar!' : !value.trim() ? 'Inget svar lämnat' : q.choices ? 'Inte riktigt – jämför svaren' : 'Ditt svar matchar inte de sparade svaren'}
                 </h3>
-                ${!q.self ? html`<p class="correct-answer" lang=${q.answerLang || 'sv'}>${languageText(q.answers?.join(' / '))}</p>` : ''}${speechButton(ctx, answer, q.self ? 'Lyssna på modellsvaret' : 'Lyssna på svaret')}
-                <p>${languageText(q.explanation || q.model)}</p>
-                ${contrastiveCallout(contrastive, value, q.answers, ctx)}
+                ${!q.self && !contrastive ? html`<p class="correct-answer" lang=${q.answerLang || 'sv'}><strong>Godtagna svar:</strong> ${languageText(q.answers?.join(' / '))}</p>` : ''}
+                ${isIncorrect && !q.choices && value.trim() ? html`<p class="feedback-note">Appen jämför med sparade svar och kan missa andra korrekta formuleringar. Jämför innehållet innan du bedömer ditt svar.</p>` : ''}
+                ${
+                  contrastive
+                    ? contrastiveCallout(contrastive, value, q, ctx)
+                    : html`<p>${languageText(q.explanation || q.model)}</p>`
+                }
+                ${speechButton(ctx, answer, q.self ? 'Lyssna på modellsvaret' : 'Lyssna på svaret')}
+                ${
+                  q.self
+                    ? html`<div class="self-checklist">
+                        <h4>Kontrollera ditt svar</h4>
+                        <p>
+                          Det här svaret bedömer du själv. Modellösningen visar ett möjligt svar.
+                        </p>
+                        <ul>
+                          ${q.checklist?.map((item) => html`<li>${languageText(item)}</li>`)}
+                        </ul>
+                      </div>`
+                    : isIncorrect
+                      ? html`<p class="learning-tip">
+                          <strong>Prova själv:</strong> ${languageText(getLearningTip(q))}
+                        </p>`
+                      : ''
+                }
                 ${
                   s.mode === 'exam'
                     ? q.self
@@ -186,6 +216,10 @@ function ratingButtonsTemplate(ctx, q, currentBox) {
   ];
 
   return html`<div class="rating-group" role="group" aria-label="Självskattad svårighetsgrad">
+    <p class="rating-help">
+      Bedöm vad du kunde innan du såg facit: Igen = behöver öva om, Svårt = kunde med möda, Bra =
+      kunde, Lätt = kunde direkt. Valet uppdaterar resultatet och nästa repetition.
+    </p>
     <div class="rating-header">
       <span class="rating-box-info"
         >Nivå: <strong>Låda ${Math.min(4, currentBox) + 1}</strong> av 5</span
@@ -194,7 +228,7 @@ function ratingButtonsTemplate(ctx, q, currentBox) {
     </div>
     <div class="rating-buttons">
       ${ratings.map(({ key, rating, label, cls }) => {
-        const interval = previewRatingInterval(currentBox, rating);
+        const interval = previewRatingInterval(ctx.state, ctx.session, q.id, rating, ctx.now);
         return html`<button
           type="button"
           class="rating-btn ${cls}"
@@ -211,26 +245,29 @@ function ratingButtonsTemplate(ctx, q, currentBox) {
     </div>
   </div>`;
 }
-function contrastiveCallout(contrastive, userVal, answers, ctx) {
+function contrastiveCallout(contrastive, userVal, q, ctx) {
   if (!contrastive) return '';
   const cleanUser = (userVal || '').trim();
-  const correctText = answers?.join(' / ') || '';
+  const correctText = q.answers?.join(' / ') || '';
   return html`<div
     class="contrastive-box contrastive-callout"
     role="region"
-    aria-label="Kontrastiv förklaring"
+    aria-label="Förstå svaret"
   >
     <div class="contrastive-header">
       <div class="contrastive-comparison">
         <span class="contrastive-chip wrong" title="Ditt svar">
-          <small>Ditt val:</small> <strong lang="ja">${cleanUser}</strong>
+          <small>Ditt val:</small>
+          <strong lang=${q.answerLang || 'sv'}>${languageText(cleanUser)}</strong>
         </span>
         <span class="contrastive-vs" aria-hidden="true">vs</span>
         <span class="contrastive-chip correct" title="Rätt svar">
-          <small>Rätt:</small> <strong lang="ja">${correctText}</strong>
+          <small>Godtagna svar:</small>
+          <strong lang=${q.answerLang || 'sv'}>${languageText(correctText)}</strong>
         </span>
       </div>
     </div>
+    <h4>Så hänger det ihop</h4>
     <p class="contrastive-text">${languageText(contrastive.text)}</p>
     ${
       contrastive.guideId
@@ -241,7 +278,8 @@ function contrastiveCallout(contrastive, userVal, answers, ctx) {
               @click=${(e) => {
                 e.preventDefault();
                 if (typeof ctx.openGuideModal === 'function') {
-                  ctx.openGuideModal(contrastive.guideId);
+                  // Safari does not focus buttons on pointer clicks; retain the actual opener.
+                  ctx.openGuideModal(contrastive.guideId, e.currentTarget);
                 } else {
                   window.dispatchEvent(
                     new CustomEvent('open-guide-modal', {
@@ -263,11 +301,13 @@ function resultView(ctx) {
   const s = ctx.session,
     result = scoreAttempt(s, questions);
   return html`<section class="result-panel">
-    ${ctx.theme === 'sakura'
-      ? html`<div class="anime-figure anime-result-mascot" aria-hidden="true">
-          <img src="/anime/cheer.jpg" alt="やった！ Bra jobbat!" loading="lazy" />
-        </div>`
-      : html`<span class="result-icon">${icon('CircleCheck')}</span>`}
+    ${
+      ctx.theme === 'sakura'
+        ? html`<div class="anime-figure anime-result-mascot" aria-hidden="true">
+            <img src="/anime/cheer.jpg" alt="やった！ Bra jobbat!" loading="lazy" />
+          </div>`
+        : html`<span class="result-icon">${icon('CircleCheck')}</span>`
+    }
     <p class="overline">${s.mode === 'exam' ? 'TENTAN ÄR INLÄMNAD' : 'BRA JOBBAT'}</p>
     <h1 tabindex="-1">${result.pending ? 'Dags att rätta fritexten.' : 'Ett steg framåt.'}</h1>
     <div class="result-number">${result.ok}<span> / ${result.total}</span></div>
@@ -291,7 +331,10 @@ function resultView(ctx) {
     </div>
     <div class="result-summary">
       ${s.ids.map((id, i) => {
-        const q = questions.find((q) => q.id === id);
+        const q = questionForSession(
+          questions.find((q) => q.id === id),
+          s,
+        );
         return html`<button @click=${() => ctx.review(i)}>
           <span class="result-marker ${s.grades[id] ? 'ok' : ''}"
             >${typeof s.grades[id] !== 'boolean' ? '?' : s.grades[id] ? '✓' : '↻'}</span

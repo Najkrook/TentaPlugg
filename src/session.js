@@ -8,6 +8,8 @@ export function createSession(ids, name, options = {}) {
     answers: {},
     grades: {},
     revealed: {},
+    exerciseVersion: 1,
+    particles: {},
     mode: 'practice',
     ...options,
   };

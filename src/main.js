@@ -15,6 +15,12 @@ import {
   importGuest as mergeGuest,
 } from './engine.js';
 import { createSession, submitSession, updateResult } from './session.js';
+import {
+  questionForSession,
+  initialParticleState,
+  reduceParticle,
+  particleSentence,
+} from './particles.js';
 import { createLocalSaver, readLocal } from './storage.js';
 import { createSyncQueue } from './sync.js';
 import { login, logout, finishRedirect, watchUser, pull, push } from './cloud.js';
@@ -82,7 +88,8 @@ function setTheme(next) {
   render();
 }
 try {
-  const storedTheme = typeof localStorage !== 'undefined' ? localStorage.getItem('tentaplugg-theme') : null;
+  const storedTheme =
+    typeof localStorage !== 'undefined' ? localStorage.getItem('tentaplugg-theme') : null;
   applyTheme(storedTheme || state.theme || 'classic');
 } catch {}
 function setupLocal(uid) {
@@ -142,7 +149,10 @@ function flush() {
   saver.flush();
 }
 function currentQ() {
-  return questions.find((q) => q.id === session?.ids[session.index]);
+  return questionForSession(
+    questions.find((q) => q.id === session?.ids[session.index]),
+    session,
+  );
 }
 function progress() {
   const stats = Object.values(state.stats);
@@ -164,7 +174,7 @@ function setPreferredCount(count) {
   const valid = [5, 10, 20, 'all'];
   if (!valid.includes(count)) return;
   state.preferredCount = count;
-  state.settingsAt = Date.now();
+  state.preferredCountAt = Date.now();
   persist(true);
   render();
 }
@@ -195,6 +205,7 @@ function getCtx() {
     check,
     grade,
     answer,
+    particleAction,
     review,
     reviewPending,
     changeDate,
@@ -263,9 +274,18 @@ function render(focus = false) {
       <div class="shell">
         <header class="topbar">
           <span class="breadcrumb">Japanska för nybörjare <span>/</span> GEMA70</span
-          ><span class="mobile-brand"><span lang="ja">学</span><b>TentaPlugg</b></span
-          ><div class="topbar-actions">
-            <button class="topbar-theme-toggle" @click=${() => toggleTheme()} title="Växla tema (🌸 Sakura / 🎓 Klassisk)" aria-label="Växla tema"><span class="theme-icon" aria-hidden="true">${state.theme === 'sakura' ? '🌸' : '🎓'}</span><span class="theme-label">${state.theme === 'sakura' ? 'Sakura' : 'Klassisk'}</span></button>
+          ><span class="mobile-brand"><span lang="ja">学</span><b>TentaPlugg</b></span>
+          <div class="topbar-actions">
+            <button
+              class="topbar-theme-toggle"
+              @click=${() => toggleTheme()}
+              title="Växla tema (🌸 Sakura / 🎓 Klassisk)"
+              aria-label="Växla tema"
+            >
+              <span class="theme-icon" aria-hidden="true"
+                >${state.theme === 'sakura' ? '🌸' : '🎓'}</span
+              ><span class="theme-label">${state.theme === 'sakura' ? 'Sakura' : 'Klassisk'}</span>
+            </button>
             <button class="account" id="account" ?disabled=${authBusy} @click=${account}>
               ${icon(user ? 'LogOut' : 'LogIn')}<span
                 >${authBusy ? 'Vänta…' : user ? `Logga ut · ${user.displayName?.split(' ')[0] || 'konto'}` : 'Logga in med Google'}</span
@@ -288,8 +308,7 @@ function render(focus = false) {
     window.scrollTo(0, 0);
   }
 }
-function openGuideModal(guideId = null) {
-  const previousActiveElement = document.activeElement;
+function openGuideModal(guideId = null, previousActiveElement = document.activeElement) {
   let dialog = document.querySelector('dialog.guide-modal');
   if (!dialog) {
     dialog = document.createElement('dialog');
@@ -508,6 +527,7 @@ function answer(value, draw = true) {
 function check() {
   if (composing) return;
   const q = currentQ();
+  if (q.type === 'particle-edit') return;
   if (!session.answers[q.id]?.trim()) {
     announce('Skriv eller välj ett svar först.');
     return;
@@ -521,13 +541,48 @@ function check() {
 }
 function grade(okOrRating, advance = false) {
   const q = currentQ();
+  if (q.type === 'particle-edit' && session.particles?.[q.id]?.stage !== 'done') return;
   recordReview(state, session, q.id, okOrRating, Date.now());
   updateResult(state, session, questions, Date.now());
   persist(true);
   if (advance) next();
   else {
     const isOk = typeof okOrRating === 'boolean' ? okOrRating : okOrRating !== 'again';
-    announce(isOk ? 'Rätt svar.' : 'Inte rätt denna gång. Förklaringen visas.');
+    announce(
+      q.type === 'particle-edit'
+        ? 'Båda stegen är rättade. Resultatet visas.'
+        : isOk
+          ? 'Rätt svar.'
+          : q.choices
+            ? 'Inte riktigt. Förklaringen visas.'
+            : 'Ditt svar matchar inte de sparade svaren. Jämför med förklaringen.',
+    );
+  }
+}
+function particleAction(action) {
+  const q = currentQ();
+  if (q?.type !== 'particle-edit') return;
+  const previous = session.particles?.[q.id] || initialParticleState(q);
+  const updated = reduceParticle(q, previous, action);
+  if (updated === previous) return;
+  stopSpeech();
+  session.particles ||= {};
+  session.particles[q.id] = updated;
+  if (updated.stage === 'done') {
+    session.answers[q.id] = particleSentence(updated);
+    grade(updated.marking.ok && updated.correctionOk);
+  } else {
+    persist(true);
+    render();
+  }
+  if (updated.stage !== previous.stage) {
+    document.querySelector('.particle-panel h1')?.focus();
+  } else if (updated.editor?.mode.endsWith('-position')) {
+    document.querySelector('.particle-position')?.focus();
+  } else if (updated.editor) {
+    document.querySelector('.particle-editor button')?.focus();
+  } else if (previous.editor) {
+    document.querySelector('.particle-tools button')?.focus();
   }
 }
 function jump(index) {
@@ -539,7 +594,11 @@ function jump(index) {
 async function next() {
   if (session.reviewSelf) {
     const index = session.ids.findIndex(
-      (id) => questions.find((q) => q.id === id)?.self && typeof session.grades[id] !== 'boolean',
+      (id) =>
+        questionForSession(
+          questions.find((q) => q.id === id),
+          session,
+        )?.self && typeof session.grades[id] !== 'boolean',
     );
     if (index >= 0) {
       jump(index);
@@ -569,7 +628,11 @@ function review(index, selfOnly = false) {
 }
 function reviewPending() {
   const index = session.ids.findIndex(
-    (id) => questions.find((q) => q.id === id)?.self && typeof session.grades[id] !== 'boolean',
+    (id) =>
+      questionForSession(
+        questions.find((q) => q.id === id),
+        session,
+      )?.self && typeof session.grades[id] !== 'boolean',
   );
   if (index >= 0) review(index, true);
 }

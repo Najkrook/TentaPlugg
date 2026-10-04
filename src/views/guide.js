@@ -19,11 +19,11 @@ export function resolveGuideId(id) {
     'wa-vs-ga': 'wa-ga',
     'ga-vs-wa': 'wa-ga',
     'wo-vs-to': 'wo-to-no-mo',
-    'particles': 'ni-de',
-    'partiklar': 'ni-de',
-    'adjective': 'adjectives',
-    'mora': 'moras',
-    'stavelser': 'moras',
+    particles: 'ni-de',
+    partiklar: 'ni-de',
+    adjective: 'adjectives',
+    mora: 'moras',
+    stavelser: 'moras',
   };
 
   if (guides.some((g) => g.id === stripped)) return stripped;
@@ -82,13 +82,9 @@ export const guideModalTemplate = (ctx, { guideId, onClose }) => {
           <span>Stäng</span>
         </button>
       </header>
-      <div class="guide-modal-body">
-        ${guideCards(ctx, { highlightId: activeId })}
-      </div>
+      <div class="guide-modal-body">${guideCards(ctx, { highlightId: activeId })}</div>
       <footer class="guide-modal-footer">
-        <button type="button" class="primary" @click=${onClose}>
-          Återgå till övningen
-        </button>
+        <button type="button" class="primary" @click=${onClose}>Återgå till övningen</button>
       </footer>
     </div>
   `;

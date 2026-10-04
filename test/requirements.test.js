@@ -562,7 +562,12 @@ test('Tier 3: Merging independent device progress preserves self-ratings and lat
     'easy',
     'Latest review rating (easy) should prevail',
   );
-  assert.equal(mergedAB.stats['sync-q'].box, 2);
+  assert.equal(
+    mergedAB.stats['sync-q'].box,
+    0,
+    'A second device cannot promote a card before it is due',
+  );
+  assert.equal(mergedAB.stats['sync-q'].dueAt, t0 + INTERVALS[0]);
 
   // Commutativity: merge(B, A) must produce identical stats
   const mergedBA = mergeProgress(devB, devA);

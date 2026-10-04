@@ -33,10 +33,22 @@ test('Empirical Stress M3-2: Early head script FOUT prevention contract', () => 
   assert(scriptMatch, 'index.html head must contain an inline script for FOUT prevention');
   const scriptBody = scriptMatch[1];
 
-  assert(scriptBody.includes("localStorage.getItem('tentaplugg-theme')"), 'Head script must read tentaplugg-theme');
-  assert(scriptBody.includes("dataset.theme = 'sakura'"), 'Head script must set dataset.theme to sakura');
-  assert(scriptBody.includes("dataset.theme = 'classic'"), 'Head script must set dataset.theme to classic');
-  assert(scriptBody.includes("try {"), 'Head script must be wrapped in try-catch for private/sandboxed browsing');
+  assert(
+    scriptBody.includes("localStorage.getItem('tentaplugg-theme')"),
+    'Head script must read tentaplugg-theme',
+  );
+  assert(
+    scriptBody.includes("dataset.theme = 'sakura'"),
+    'Head script must set dataset.theme to sakura',
+  );
+  assert(
+    scriptBody.includes("dataset.theme = 'classic'"),
+    'Head script must set dataset.theme to classic',
+  );
+  assert(
+    scriptBody.includes('try {'),
+    'Head script must be wrapped in try-catch for private/sandboxed browsing',
+  );
 
   // Simulate head script evaluation in different simulated environments
   const runHeadScriptSim = (storedValue, throwsError = false) => {
@@ -158,8 +170,16 @@ test('Empirical Stress M3-3: Theme state sanitizer and toggle transition logic',
     const expected = i % 2 === 1 ? 'sakura' : 'classic';
     tm4.toggleTheme();
     assert.equal(tm4.getState().theme, expected, `Step ${i}: state.theme must be ${expected}`);
-    assert.equal(tm4.getDocDataset().theme, expected, `Step ${i}: dataset.theme must be ${expected}`);
-    assert.equal(tm4.getStore()['tentaplugg-theme'], expected, `Step ${i}: store must be ${expected}`);
+    assert.equal(
+      tm4.getDocDataset().theme,
+      expected,
+      `Step ${i}: dataset.theme must be ${expected}`,
+    );
+    assert.equal(
+      tm4.getStore()['tentaplugg-theme'],
+      expected,
+      `Step ${i}: store must be ${expected}`,
+    );
     assert.equal(
       tm4.getMetaColor(),
       expected === 'sakura' ? '#a82e66' : '#183f37',
@@ -222,7 +242,8 @@ test('Empirical Stress M3-5: Anime image assets integrity on disk', () => {
 });
 
 test('Empirical Stress M3-6: CSS hard-hiding rules and theme selector verification', () => {
-  const css = readFileSync(resolve('src/style.css'), 'utf8');
+  // Attribute selectors mean the same thing with either CSS quote style.
+  const css = readFileSync(resolve('src/style.css'), 'utf8').replaceAll("'", '"');
 
   // Hard hiding rule check:
   // Must contain rule hiding anime-figure when NOT sakura

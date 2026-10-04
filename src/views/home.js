@@ -98,18 +98,24 @@ export function homeView(ctx) {
           >${currentPref === 5 ? '5 frågor · cirka 3 minuter' : currentPref === 20 ? '20 frågor · cirka 10 minuter' : currentPref === 'all' ? `${p.due} frågor · repetera allt förfallet` : '10 frågor · cirka 5 minuter'}</span
         >
       </div>
-      ${ctx.theme === 'sakura'
-        ? html`<div class="anime-figure anime-study-panel" aria-hidden="true">
-            <img src="/anime/study.jpg" alt="Sakura-maskot som studerar japanska" loading="lazy" />
-          </div>`
-        : html`<div class="particle-art" aria-hidden="true" lang="ja">
-            <div class="glyph small">を</div>
-            <div class="glyph mid">に</div>
-            <div class="glyph main">は</div>
-            <div class="glyph low">で</div>
-            <div class="glyph last">が</div>
-            <span>ひとつずつ、一歩ずつ。</span>
-          </div>`}
+      ${
+        ctx.theme === 'sakura'
+          ? html`<div class="anime-figure anime-study-panel" aria-hidden="true">
+              <img
+                src="/anime/study.jpg"
+                alt="Sakura-maskot som studerar japanska"
+                loading="lazy"
+              />
+            </div>`
+          : html`<div class="particle-art" aria-hidden="true" lang="ja">
+              <div class="glyph small">を</div>
+              <div class="glyph mid">に</div>
+              <div class="glyph main">は</div>
+              <div class="glyph low">で</div>
+              <div class="glyph last">が</div>
+              <span>ひとつずつ、一歩ずつ。</span>
+            </div>`
+      }
     </section>
     <div class="stats-strip">
       <div>

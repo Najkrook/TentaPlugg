@@ -59,7 +59,10 @@ test('Empirical Stress 1: Full 4-rating progression matrix across all Boxes 0 to
       };
       const stat = nextStat(prev, r, baseTime, `rev-${box}-${r}`);
 
-      assert(stat.box >= 0 && stat.box <= 4, `Box ${stat.box} out of range [0, 4] for box ${box} + ${r}`);
+      assert(
+        stat.box >= 0 && stat.box <= 4,
+        `Box ${stat.box} out of range [0, 4] for box ${box} + ${r}`,
+      );
       assert(stat.dueAt > baseTime, `dueAt must be in the future`);
       assert(!Number.isNaN(stat.dueAt), `dueAt must not be NaN`);
       assert(Number.isFinite(stat.dueAt), `dueAt must be finite`);
@@ -333,7 +336,11 @@ test('Empirical Stress 6: SCHEMA_VERSION = 2 never triggers wipe migration and p
       practice: { at: t0, session: { index: 3, ids: ['q-existing'] } },
     },
     attempts: {
-      att: { ids: ['q-existing'], answers: { 'q-existing': 'ans' }, grades: { 'q-existing': true } },
+      att: {
+        ids: ['q-existing'],
+        answers: { 'q-existing': 'ans' },
+        grades: { 'q-existing': true },
+      },
     },
     history: [{ id: 'att', at: t0, ok: 1, total: 1 }],
     theme: 'sakura',
@@ -384,18 +391,12 @@ test('Empirical Stress 7: Fuzz testing - Valid finite numbers produced on valid 
       typeof stat.box === 'number' && !Number.isNaN(stat.box) && Number.isFinite(stat.box),
       `stat.box is not a valid finite number for input: ${r}`,
     );
-    assert(
-      stat.box >= 0 && stat.box <= 4,
-      `stat.box ${stat.box} is not in [0, 4] for input: ${r}`,
-    );
+    assert(stat.box >= 0 && stat.box <= 4, `stat.box ${stat.box} is not in [0, 4] for input: ${r}`);
     assert(
       typeof stat.dueAt === 'number' && !Number.isNaN(stat.dueAt) && Number.isFinite(stat.dueAt),
       `stat.dueAt is not a valid finite number for input: ${r}`,
     );
-    assert(
-      typeof stat.ok === 'boolean',
-      `stat.ok is not boolean for input: ${r}`,
-    );
+    assert(typeof stat.ok === 'boolean', `stat.ok is not boolean for input: ${r}`);
   }
 
   // Previous stat structures with missing/default properties
@@ -413,8 +414,14 @@ test('Empirical Stress 7: Fuzz testing - Valid finite numbers produced on valid 
   for (const prev of validBoundaryPrevious) {
     const stat = nextStat(prev, 'good', validTime, 'fuzz-prev');
     assert(!Number.isNaN(stat.box), `box must not be NaN for previous: ${JSON.stringify(prev)}`);
-    assert(Number.isFinite(stat.dueAt), `dueAt must be finite for previous: ${JSON.stringify(prev)}`);
-    assert(!Number.isNaN(stat.attempts), `attempts must not be NaN for previous: ${JSON.stringify(prev)}`);
+    assert(
+      Number.isFinite(stat.dueAt),
+      `dueAt must be finite for previous: ${JSON.stringify(prev)}`,
+    );
+    assert(
+      !Number.isNaN(stat.attempts),
+      `attempts must not be NaN for previous: ${JSON.stringify(prev)}`,
+    );
   }
 });
 
@@ -487,7 +494,10 @@ test('Empirical Stress 9: Session size selection scaling & boundary conditions (
   for (let i = 1; i < selAll.length; i++) {
     const prevDue = stats[selAll[i - 1]].dueAt;
     const currDue = stats[selAll[i]].dueAt;
-    assert(prevDue <= currDue, `Practice queue must prioritize older due items: ${prevDue} <= ${currDue}`);
+    assert(
+      prevDue <= currDue,
+      `Practice queue must prioritize older due items: ${prevDue} <= ${currDue}`,
+    );
   }
 
   // Zero due questions

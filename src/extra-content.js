@@ -36,7 +36,7 @@ for (const [kana, romaji] of kanaRows)
         topic: 'Kana',
         prompt: `Skriv med romaji: ${glyph}`,
         answers,
-        explanation: `${glyph} skrivs ${answers.join(' eller ')}. Hepburn används som huvudform; vanliga Kunrei-varianter godtas. を godtar både wo och uttalet o.`,
+        explanation: `${glyph} skrivs ${answers.join(' eller ')}. ${script === 'hiragana' ? 'Hiragana' : 'Katakana'} återger här ${char === 'を' ? 'uttalet o eller romaniseringen wo' : `ljudet ${answer}`}. ${['がぎぐげご', 'ざじずぜぞ', 'だぢづでど', 'ばびぶべぼ'].includes(kana) ? 'De två små strecken (dakuten) ändrar grundtecknets ljud; de måste tas med i läsningen.' : 'ぱぴぷぺぽ'.includes(char) ? 'Den lilla ringen (handakuten) ger p-ljud. Två små streck skulle ge b-ljud.' : char === 'を' ? 'Som partikel uttalas tecknet normalt o. Både wo och o godtas här.' : `Jämför tecknet med de andra i samma rad: ${script === 'hiragana' ? kana : [...kana].map((c) => String.fromCharCode(c.charCodeAt(0) + 0x60)).join('')} → ${romaji}.`}`,
         source: 'Kompletterande övning',
         promptLang: 'sv',
         answerLang: 'en',
