@@ -39,10 +39,25 @@ let activeUserUid = null;
 let unloadRegistered = false;
 let lobbyBusy = false;
 let viewEpoch = 0;
+let hostTimeOffset = 0;
+
+function updateHostTimeOffset(data) {
+  if (!data) return;
+  if (data.host?.uid === activeUserUid) {
+    hostTimeOffset = 0;
+  } else if (data.updatedAt) {
+    hostTimeOffset = data.updatedAt - Date.now();
+  }
+}
+
+function getSyncedNow() {
+  return Date.now() + hostTimeOffset;
+}
 
 export function resetMultiplayerView(uid = null) {
   const leaving = activeLobbyId && uid ? leaveLobby(activeLobbyId, uid) : Promise.resolve();
   viewEpoch++;
+  hostTimeOffset = 0;
   if (lobbyUnsub) {
     lobbyUnsub();
     lobbyUnsub = null;
@@ -82,6 +97,7 @@ function watchLobby(ctx, code) {
         feedbackMessage = 'Lobbyn har stängts.';
       } else {
         currentLobbyData = data;
+        updateHostTimeOffset(data);
       }
       ctx.render();
     },
@@ -116,12 +132,12 @@ export function multiplayerView(ctx) {
     });
   }
 
-  // Timer loop for arena round checks & timeouts
+  // Timer loop for arena round checks & timeouts (runs every 250ms for smooth progress bar)
   if (activeLobbyId && !timerInterval) {
     let advancing = false;
     timerInterval = setInterval(async () => {
       const game = currentLobbyData?.game;
-      const now = Date.now();
+      const now = getSyncedNow();
       if (
         currentLobbyData?.status === 'waiting' &&
         currentLobbyData.host?.uid !== activeUserUid &&
@@ -133,9 +149,15 @@ export function multiplayerView(ctx) {
         return;
       }
       if (!game || game.status === 'finished') return;
+
+      const isHost = currentLobbyData.host?.uid === activeUserUid;
+      const roundExpired = game.status === 'playing' && now > game.roundStartTime + ROUND_TIME_MS;
+      const pauseExpired = game.status === 'round_end' && now >= game.nextRoundAt;
+      // Host triggers advance immediately; guests only act as a safety fallback (+4s delay)
       const due =
-        (game.status === 'playing' && now > game.roundStartTime + ROUND_TIME_MS) ||
-        (game.status === 'round_end' && now >= game.nextRoundAt);
+        (roundExpired && (isHost || now > game.roundStartTime + ROUND_TIME_MS + 4000)) ||
+        (pauseExpired && (isHost || now >= game.nextRoundAt + 3000));
+
       if (activeLobbyId && due && !advancing) {
         advancing = true;
         const epoch = viewEpoch;
@@ -149,7 +171,7 @@ export function multiplayerView(ctx) {
         }
       }
       ctx.render?.();
-    }, 500);
+    }, 250);
   }
 
   // Heartbeat loop for keeping waiting lobby alive
@@ -429,31 +451,31 @@ function lobbyBrowserView(ctx) {
                         : html`
                             <ul class="lobbies-list">
                               ${openLobbiesList.map((lobby) => {
-                                const isMe = lobby.host.uid === user.uid;
+                                const isMe = lobby.host?.uid === user?.uid;
                                 const branchName =
                                   lobby.category === 'particles'
                                     ? 'Partiklar'
                                     : lobby.category === 'vocab'
                                       ? 'Vokabulär'
                                       : 'Ordföljd';
-                                const count = lobby.playerCount || (lobby.guest ? 2 : 1);
+                                const count = lobby.playerCount || Object.keys(lobby.players || {}).length || (lobby.guest ? 2 : 1);
                                 return html`
                                   <li class="lobby-item">
                                     <div class="lobby-info">
                                       <div class="host-avatar">
                                         ${
-                                          lobby.host.photoURL
+                                          lobby.host?.photoURL
                                             ? html`<img src=${lobby.host.photoURL} alt="" />`
                                             : html`<span class="avatar-placeholder"
-                                                >${lobby.host.displayName[0]}</span
+                                                >${lobby.host?.displayName?.[0] || '?'}</span
                                               >`
                                         }
                                       </div>
                                       <div>
-                                        <strong class="host-name">${lobby.host.displayName}</strong>
+                                        <strong class="host-name">${lobby.host?.displayName || 'Värd'}</strong>
                                         <div class="lobby-tags">
                                           <span class="badge elo-badge"
-                                            >${lobby.host.elo || DEFAULT_ELO} ELO</span
+                                            >${lobby.host?.elo || DEFAULT_ELO} ELO</span
                                           >
                                           <span class="badge cat-badge">${branchName}</span>
                                           <span class="badge count-badge"
@@ -536,11 +558,11 @@ async function joinSelectedLobby(ctx, lobbyId) {
    ========================================================================= */
 function waitingRoomView(ctx) {
   const { user } = ctx;
-  const isHost = currentLobbyData.host?.uid === user.uid;
+  const isHost = currentLobbyData.host?.uid === user?.uid;
 
   const playersMap = currentLobbyData.players || {
-    [currentLobbyData.host.uid]: currentLobbyData.host,
-    ...(currentLobbyData.guest ? { [currentLobbyData.guest.uid]: currentLobbyData.guest } : {}),
+    ...(currentLobbyData.host?.uid ? { [currentLobbyData.host.uid]: currentLobbyData.host } : {}),
+    ...(currentLobbyData.guest?.uid ? { [currentLobbyData.guest.uid]: currentLobbyData.guest } : {}),
   };
   const playersList = Object.values(playersMap);
   const count = playersList.length;
@@ -661,25 +683,29 @@ function arenaView(ctx) {
   const game = currentLobbyData.game;
   if (!game) return html`<div>Laddar match...</div>`;
 
-  const now = Date.now();
-  const isCountdown = game.roundStartTime && now < game.roundStartTime;
-  const countdownSec = Math.max(1, Math.ceil((game.roundStartTime - now) / 1000));
+  const now = getSyncedNow();
+  // Ready countdown ONLY applies to round 0 before the roundStartTime
+  const isCountdown =
+    game.currentRoundIndex === 0 &&
+    Boolean(game.roundStartTime) &&
+    now < game.roundStartTime;
+  const countdownSec = Math.max(1, Math.min(3, Math.ceil(((game.roundStartTime || now) - now) / 1000)));
 
   const roundIdx = game.currentRoundIndex || 0;
   const currentQ = game.questions?.[roundIdx] || { prompt: '', choices: [] };
 
   const playersMap = currentLobbyData.players || {
-    [currentLobbyData.host.uid]: currentLobbyData.host,
-    ...(currentLobbyData.guest ? { [currentLobbyData.guest.uid]: currentLobbyData.guest } : {}),
+    ...(currentLobbyData.host?.uid ? { [currentLobbyData.host.uid]: currentLobbyData.host } : {}),
+    ...(currentLobbyData.guest?.uid ? { [currentLobbyData.guest.uid]: currentLobbyData.guest } : {}),
   };
   const allPlayers = Object.values(playersMap);
   const activeUids = getActivePlayerUids(game);
   const totalPlayers = activeUids.length;
-  const hasForfeited = game.forfeitedUids?.includes(user.uid);
+  const hasForfeited = game.forfeitedUids?.includes(user?.uid);
 
   const roundAnswers = game.answers?.[roundIdx] || {};
   const answeredCount = activeUids.filter((uid) => Boolean(roundAnswers[uid])).length;
-  const myAnswer = roundAnswers[user.uid];
+  const myAnswer = user?.uid ? roundAnswers[user.uid] : null;
   const hasAnswered = Boolean(myAnswer);
   const roundWinners = game.roundWinners || {};
   const roundWinnerUid = roundWinners[roundIdx];
@@ -696,8 +722,8 @@ function arenaView(ctx) {
     }))
     .sort((a, b) => b.score - a.score);
 
-  const myRank = sortedStandings.findIndex((p) => p.uid === user.uid) + 1 || 1;
-  const myScore = scores[user.uid] || 0;
+  const myRank = sortedStandings.findIndex((p) => p.uid === user?.uid) + 1 || 1;
+  const myScore = (user?.uid && scores[user.uid]) || 0;
   const leader = sortedStandings[0] || { displayName: 'Ingen', score: 0 };
 
   // Timer bar calculation
@@ -714,7 +740,7 @@ function arenaView(ctx) {
         <div class="arena-player arena-me">
           <span class="arena-player-label">#${myRank} Du</span>
           <div class="arena-score ${myAnswer?.isCorrect ? 'score-gain' : ''}">
-            ${myScore.toLocaleString('sv-SE')}p
+            ${(myScore || 0).toLocaleString('sv-SE')}p
           </div>
         </div>
 
@@ -735,139 +761,140 @@ function arenaView(ctx) {
 
         <div class="arena-player arena-leader">
           <span class="arena-player-label"
-            >#1 ${leader.uid === user.uid ? 'Du leder!' : leader.displayName}</span
+            >#1 ${leader.uid === user?.uid ? 'Du leder!' : leader.displayName}</span
           >
-          <div class="arena-score">${leader.score.toLocaleString('sv-SE')}p</div>
+          <div class="arena-score">${(leader.score || 0).toLocaleString('sv-SE')}p</div>
         </div>
       </header>
 
-      ${
-        isCountdown
-          ? html`
-              <div class="arena-countdown-overlay card">
-                <span class="countdown-label">Gör dig redo!</span>
-                <div class="countdown-number">${countdownSec}</div>
-                <p>Snabbaste korrekta svaren ger upp till 1 000 poäng. Fel svar ger −250p!</p>
-              </div>
-            `
-          : html`
-              <!-- Question Card -->
-              <div class="card question-card">
-                <div class="question-prompt">${languageText(currentQ.prompt)}</div>
-              </div>
+      <!-- Question Card (ALWAYS visible so players immediately see what to answer!) -->
+      <div class="card question-card">
+        ${
+          isCountdown
+            ? html`
+                <div class="countdown-banner">
+                  ${icon('Clock')}
+                  <span
+                    >Gör dig redo! Svarsknapparna låses upp om
+                    <span class="countdown-badge-num">${countdownSec}</span> s</span
+                  >
+                </div>
+              `
+            : ''
+        }
+        <div class="question-prompt">${languageText(currentQ.prompt)}</div>
+      </div>
 
-              <!-- 4 Multiple Choice Buttons -->
-              <div class="choices-grid">
-                ${currentQ.choices.map((choice) => {
-                  const wasChosen = myAnswer?.answer === choice;
-                  let btnState = '';
-                  if (hasAnswered) {
-                    if (wasChosen && myAnswer.isCorrect) btnState = 'btn-correct';
-                    else if (wasChosen && !myAnswer.isCorrect) btnState = 'btn-wrong';
-                    else if (choice === currentQ.correctAnswer && game.status === 'round_end')
-                      btnState = 'btn-reveal-correct';
+      <!-- 4 Multiple Choice Buttons -->
+      <div class="choices-grid">
+        ${currentQ.choices.map((choice) => {
+          const wasChosen = myAnswer?.answer === choice;
+          let btnState = '';
+          if (hasAnswered) {
+            if (wasChosen && myAnswer.isCorrect) btnState = 'btn-correct';
+            else if (wasChosen && !myAnswer.isCorrect) btnState = 'btn-wrong';
+            else if (choice === currentQ.correctAnswer && game.status === 'round_end')
+              btnState = 'btn-reveal-correct';
+          }
+
+          return html`
+            <button
+              type="button"
+              class="choice-btn ${btnState} ${isCountdown ? 'btn-waiting' : ''}"
+              ?disabled=${hasAnswered || hasForfeited || game.status !== 'playing' || isCountdown}
+              @click=${async () => {
+                if (hasAnswered || hasForfeited || game.status !== 'playing' || isCountdown) return;
+                const isCorrect = choice === currentQ.correctAnswer;
+                if (isCorrect) {
+                  playAnimeSound('wow', ctx.theme);
+                } else {
+                  playAnimeSound('nani', ctx.theme);
+                }
+                const epoch = viewEpoch;
+                try {
+                  await submitAnswer(activeLobbyId, user.uid, roundIdx, choice);
+                } catch (error) {
+                  if (epoch === viewEpoch) {
+                    feedbackMessage = error.message || 'Kunde inte skicka svaret';
+                    ctx.render();
                   }
-
-                  return html`
-                    <button
-                      type="button"
-                      class="choice-btn ${btnState}"
-                      ?disabled=${hasAnswered || hasForfeited || game.status !== 'playing'}
-                      @click=${async () => {
-                        if (hasAnswered || hasForfeited || game.status !== 'playing') return;
-                        const isCorrect = choice === currentQ.correctAnswer;
-                        if (isCorrect) {
-                          playAnimeSound('wow', ctx.theme);
-                        } else {
-                          playAnimeSound('nani', ctx.theme);
-                        }
-                        const epoch = viewEpoch;
-                        try {
-                          await submitAnswer(activeLobbyId, user.uid, roundIdx, choice);
-                        } catch (error) {
-                          if (epoch === viewEpoch) {
-                            feedbackMessage = error.message || 'Kunde inte skicka svaret';
-                            ctx.render();
-                          }
-                        }
-                      }}
-                    >
-                      <span class="choice-text">${languageText(choice)}</span>
-                      ${
-                        wasChosen && myAnswer.isCorrect
-                          ? html`<span class="choice-badge">+${myAnswer.pointsAwarded}p!</span>`
-                          : ''
-                      }
-                      ${
-                        wasChosen && !myAnswer.isCorrect
-                          ? html`<span class="choice-badge badge-wrong"
-                              >${myAnswer.pointsAwarded}p!</span
-                            >`
-                          : ''
-                      }
-                    </button>
-                  `;
-                })}
-              </div>
-
-              <!-- Round Result Banner during 2.0s Facitpaus -->
+                }
+              }}
+            >
+              <span class="choice-text">${languageText(choice)}</span>
               ${
-                game.status === 'round_end'
-                  ? html`
-                      <div class="round-end-banner">
-                        <div class="round-feedback-header">
-                          ${
-                            myAnswer?.isCorrect
-                              ? roundWinnerUid === user.uid
-                                ? html`<strong class="winner-self"
-                                    >${icon('Check')} Du var snabbast!
-                                    (+${myAnswer.pointsAwarded}p)</strong
-                                  >`
-                                : html`<strong class="winner-self"
-                                    >${icon('Check')} Rätt svar!
-                                    (+${myAnswer.pointsAwarded}p)</strong
-                                  >`
-                              : myAnswer
-                                ? html`<strong class="winner-opp"
-                                    >${icon('X')} Fel svar! (${myAnswer.pointsAwarded}p)</strong
-                                  >`
-                                : html`<strong>${icon('Clock')} Tiden ute! (0p)</strong>`
-                          }
-                        </div>
-                        ${
-                          currentQ.explanation
-                            ? html`<p class="round-expl">${currentQ.explanation}</p>`
-                            : ''
-                        }
-
-                        <!-- Mini Kahoot-Style Leaderboard during pause -->
-                        <div class="mini-leaderboard">
-                          <span class="mini-lb-title">Ställning efter fråga ${roundIdx + 1}</span>
-                          <div class="mini-lb-list">
-                            ${sortedStandings.slice(0, 5).map((p, idx) => {
-                              const isMe = p.uid === user.uid;
-                              return html`
-                                <div class="mini-lb-row ${isMe ? 'row-me' : ''}">
-                                  <span class="mini-lb-rank">#${idx + 1}</span>
-                                  <span class="mini-lb-name">${p.displayName}</span>
-                                  ${
-                                    p.roundPoints > 0
-                                      ? html`<span class="mini-lb-gain">+${p.roundPoints}p</span>`
-                                      : ''
-                                  }
-                                  <span class="mini-lb-score"
-                                    >${p.score.toLocaleString('sv-SE')}p</span
-                                  >
-                                </div>
-                              `;
-                            })}
-                          </div>
-                        </div>
-                      </div>
-                    `
+                wasChosen && myAnswer.isCorrect
+                  ? html`<span class="choice-badge">+${myAnswer.pointsAwarded}p!</span>`
                   : ''
               }
+              ${
+                wasChosen && !myAnswer.isCorrect
+                  ? html`<span class="choice-badge badge-wrong"
+                      >${myAnswer.pointsAwarded}p!</span
+                    >`
+                  : ''
+              }
+            </button>
+          `;
+        })}
+      </div>
+
+      <!-- Round Result Banner during 2.0s Facitpaus -->
+      ${
+        game.status === 'round_end'
+          ? html`
+              <div class="round-end-banner">
+                <div class="round-feedback-header">
+                  ${
+                    myAnswer?.isCorrect
+                      ? roundWinnerUid === user?.uid
+                        ? html`<strong class="winner-self"
+                            >${icon('Check')} Du var snabbast!
+                            (+${myAnswer.pointsAwarded}p)</strong
+                          >`
+                        : html`<strong class="winner-self"
+                            >${icon('Check')} Rätt svar!
+                            (+${myAnswer.pointsAwarded}p)</strong
+                          >`
+                      : myAnswer
+                        ? html`<strong class="winner-opp"
+                            >${icon('X')} Fel svar! (${myAnswer.pointsAwarded}p)</strong
+                          >`
+                        : html`<strong>${icon('Clock')} Tiden ute! (0p)</strong>`
+                  }
+                </div>
+                ${
+                  currentQ.explanation
+                    ? html`<p class="round-expl">${currentQ.explanation}</p>`
+                    : ''
+                }
+
+                <!-- Mini Kahoot-Style Leaderboard during pause -->
+                <div class="mini-leaderboard">
+                  <span class="mini-lb-title">Ställning efter fråga ${roundIdx + 1}</span>
+                  <div class="mini-lb-list">
+                    ${sortedStandings.slice(0, 5).map((p, idx) => {
+                      const isMe = p.uid === user?.uid;
+                      return html`
+                        <div class="mini-lb-row ${isMe ? 'row-me' : ''}">
+                          <span class="mini-lb-rank">#${idx + 1}</span>
+                          <span class="mini-lb-name">${p.displayName}</span>
+                          ${
+                            p.roundPoints > 0
+                              ? html`<span class="mini-lb-gain">+${p.roundPoints}p</span>`
+                              : ''
+                          }
+                          <span class="mini-lb-score"
+                            >${(p.score || 0).toLocaleString('sv-SE')}p</span
+                          >
+                        </div>
+                      `;
+                    })}
+                  </div>
+                </div>
+              </div>
             `
+          : ''
       }
     </div>
   `;
@@ -882,8 +909,8 @@ function matchResultView(ctx) {
   if (!game) return html`<div>Resultat saknas</div>`;
 
   const playersMap = currentLobbyData.players || {
-    [currentLobbyData.host.uid]: currentLobbyData.host,
-    ...(currentLobbyData.guest ? { [currentLobbyData.guest.uid]: currentLobbyData.guest } : {}),
+    ...(currentLobbyData.host?.uid ? { [currentLobbyData.host.uid]: currentLobbyData.host } : {}),
+    ...(currentLobbyData.guest?.uid ? { [currentLobbyData.guest.uid]: currentLobbyData.guest } : {}),
   };
   const allPlayers = Object.values(playersMap);
 
@@ -899,12 +926,12 @@ function matchResultView(ctx) {
     }))
     .sort((a, b) => b.score - a.score);
 
-  const myRank = sortedFinal.findIndex((p) => p.uid === user.uid) + 1 || 1;
-  const outcome = getPlayerMatchOutcome(game, user.uid);
+  const myRank = sortedFinal.findIndex((p) => p.uid === user?.uid) + 1 || 1;
+  const outcome = getPlayerMatchOutcome(game, user?.uid);
   const isWinner = outcome === 'win';
   const isDraw = outcome === 'draw';
-  const myEloDiff = game.eloChanges?.[user.uid] || 0;
-  const myFinalScore = scores[user.uid] || 0;
+  const myEloDiff = (user?.uid && game.eloChanges?.[user.uid]) || 0;
+  const myFinalScore = (user?.uid && scores[user.uid]) || 0;
 
   if (isWinner && !hasCelebrated) {
     hasCelebrated = true;
@@ -955,7 +982,7 @@ function matchResultView(ctx) {
                       <div class="podium-player">
                         <span class="podium-medal">🥈</span>
                         <strong class="podium-name">${second.displayName}</strong>
-                        <span class="podium-score">${second.score.toLocaleString('sv-SE')}p</span>
+                        <span class="podium-score">${(second.score || 0).toLocaleString('sv-SE')}p</span>
                       </div>
                       <div class="podium-bar bar-silver">#2</div>
                     </div>
@@ -969,7 +996,7 @@ function matchResultView(ctx) {
                       <div class="podium-player">
                         <span class="podium-medal">🥇</span>
                         <strong class="podium-name">${first.displayName}</strong>
-                        <span class="podium-score">${first.score.toLocaleString('sv-SE')}p</span>
+                        <span class="podium-score">${(first.score || 0).toLocaleString('sv-SE')}p</span>
                       </div>
                       <div class="podium-bar bar-gold">#1</div>
                     </div>
@@ -983,7 +1010,7 @@ function matchResultView(ctx) {
                       <div class="podium-player">
                         <span class="podium-medal">🥉</span>
                         <strong class="podium-name">${third.displayName}</strong>
-                        <span class="podium-score">${third.score.toLocaleString('sv-SE')}p</span>
+                        <span class="podium-score">${(third.score || 0).toLocaleString('sv-SE')}p</span>
                       </div>
                       <div class="podium-bar bar-bronze">#3</div>
                     </div>
@@ -1018,7 +1045,7 @@ function matchResultView(ctx) {
               </thead>
               <tbody>
                 ${sortedFinal.map((p, idx) => {
-                  const isMe = p.uid === user.uid;
+                  const isMe = p.uid === user?.uid;
                   const rankIcon =
                     idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `${idx + 1}`;
                   return html`
@@ -1039,7 +1066,7 @@ function matchResultView(ctx) {
                         </div>
                       </td>
                       <td class="col-score">
-                        <strong>${p.score.toLocaleString('sv-SE')}p</strong>
+                        <strong>${(p.score || 0).toLocaleString('sv-SE')}p</strong>
                       </td>
                       <td class="col-elo">
                         <span

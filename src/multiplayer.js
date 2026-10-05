@@ -879,7 +879,9 @@ export async function submitPlayerAnswer(lobbyId, uid, roundIndex, selectedAnswe
     if (!data.game) return null;
 
     const game = data.game;
-    const now = Date.now();
+    const localNow = Date.now();
+    const skew = data.updatedAt ? data.updatedAt - localNow : 0;
+    const now = Math.max(game.roundStartTime || 0, localNow + skew);
 
     if (game.currentRoundIndex !== roundIndex) return null;
     const updatedGame = evaluateRound(game, uid, selectedAnswer, now, data.players);
@@ -920,7 +922,9 @@ export async function advanceRoundIfDue(lobbyId) {
     const data = snap.data();
     if (!data.game) return;
 
-    const now = Date.now();
+    const localNow = Date.now();
+    const skew = data.updatedAt ? data.updatedAt - localNow : 0;
+    const now = localNow + skew;
     const game = data.game;
 
     if (game.status === 'round_end' && game.nextRoundAt && now >= game.nextRoundAt) {
