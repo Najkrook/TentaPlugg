@@ -767,77 +767,76 @@ function arenaView(ctx) {
         </div>
       </header>
 
-      <!-- Question Card (ALWAYS visible so players immediately see what to answer!) -->
-      <div class="card question-card">
-        ${
-          isCountdown
-            ? html`
-                <div class="countdown-banner">
-                  ${icon('Clock')}
-                  <span
-                    >Gör dig redo! Svarsknapparna låses upp om
-                    <span class="countdown-badge-num">${countdownSec}</span> s</span
-                  >
-                </div>
-              `
-            : ''
-        }
-        <div class="question-prompt">${languageText(currentQ.prompt)}</div>
-      </div>
+      ${
+        isCountdown
+          ? html`
+              <div class="arena-countdown-overlay card">
+                <span class="countdown-label">Gör dig redo!</span>
+                <div class="countdown-number">${countdownSec}</div>
+                <p>Snabbaste korrekta svaren ger upp till 1 000 poäng. Fel svar ger −250p!</p>
+              </div>
+            `
+          : html`
+              <!-- Question Card -->
+              <div class="card question-card">
+                <div class="question-prompt">${languageText(currentQ.prompt)}</div>
+              </div>
 
-      <!-- 4 Multiple Choice Buttons -->
-      <div class="choices-grid">
-        ${currentQ.choices.map((choice) => {
-          const wasChosen = myAnswer?.answer === choice;
-          let btnState = '';
-          if (hasAnswered) {
-            if (wasChosen && myAnswer.isCorrect) btnState = 'btn-correct';
-            else if (wasChosen && !myAnswer.isCorrect) btnState = 'btn-wrong';
-            else if (choice === currentQ.correctAnswer && game.status === 'round_end')
-              btnState = 'btn-reveal-correct';
-          }
-
-          return html`
-            <button
-              type="button"
-              class="choice-btn ${btnState} ${isCountdown ? 'btn-waiting' : ''}"
-              ?disabled=${hasAnswered || hasForfeited || game.status !== 'playing' || isCountdown}
-              @click=${async () => {
-                if (hasAnswered || hasForfeited || game.status !== 'playing' || isCountdown) return;
-                const isCorrect = choice === currentQ.correctAnswer;
-                if (isCorrect) {
-                  playAnimeSound('wow', ctx.theme);
-                } else {
-                  playAnimeSound('nani', ctx.theme);
-                }
-                const epoch = viewEpoch;
-                try {
-                  await submitAnswer(activeLobbyId, user.uid, roundIdx, choice);
-                } catch (error) {
-                  if (epoch === viewEpoch) {
-                    feedbackMessage = error.message || 'Kunde inte skicka svaret';
-                    ctx.render();
+              <!-- 4 Multiple Choice Buttons -->
+              <div class="choices-grid">
+                ${currentQ.choices.map((choice) => {
+                  const wasChosen = myAnswer?.answer === choice;
+                  let btnState = '';
+                  if (hasAnswered) {
+                    if (wasChosen && myAnswer.isCorrect) btnState = 'btn-correct';
+                    else if (wasChosen && !myAnswer.isCorrect) btnState = 'btn-wrong';
+                    else if (choice === currentQ.correctAnswer && game.status === 'round_end')
+                      btnState = 'btn-reveal-correct';
                   }
-                }
-              }}
-            >
-              <span class="choice-text">${languageText(choice)}</span>
-              ${
-                wasChosen && myAnswer.isCorrect
-                  ? html`<span class="choice-badge">+${myAnswer.pointsAwarded}p!</span>`
-                  : ''
-              }
-              ${
-                wasChosen && !myAnswer.isCorrect
-                  ? html`<span class="choice-badge badge-wrong"
-                      >${myAnswer.pointsAwarded}p!</span
-                    >`
-                  : ''
-              }
-            </button>
-          `;
-        })}
-      </div>
+
+                  return html`
+                    <button
+                      type="button"
+                      class="choice-btn ${btnState}"
+                      ?disabled=${hasAnswered || hasForfeited || game.status !== 'playing'}
+                      @click=${async () => {
+                        if (hasAnswered || hasForfeited || game.status !== 'playing') return;
+                        const isCorrect = choice === currentQ.correctAnswer;
+                        if (isCorrect) {
+                          playAnimeSound('wow', ctx.theme);
+                        } else {
+                          playAnimeSound('nani', ctx.theme);
+                        }
+                        const epoch = viewEpoch;
+                        try {
+                          await submitAnswer(activeLobbyId, user.uid, roundIdx, choice);
+                        } catch (error) {
+                          if (epoch === viewEpoch) {
+                            feedbackMessage = error.message || 'Kunde inte skicka svaret';
+                            ctx.render();
+                          }
+                        }
+                      }}
+                    >
+                      <span class="choice-text">${languageText(choice)}</span>
+                      ${
+                        wasChosen && myAnswer.isCorrect
+                          ? html`<span class="choice-badge">+${myAnswer.pointsAwarded}p!</span>`
+                          : ''
+                      }
+                      ${
+                        wasChosen && !myAnswer.isCorrect
+                          ? html`<span class="choice-badge badge-wrong"
+                              >${myAnswer.pointsAwarded}p!</span
+                            >`
+                          : ''
+                      }
+                    </button>
+                  `;
+                })}
+              </div>
+            `
+      }
 
       <!-- Round Result Banner during 2.0s Facitpaus -->
       ${
