@@ -2,7 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   calculateEloChange,
+  calculateMultiplayerEloChanges,
   applyElo,
+  calculateTimePoints,
   generateLobbyCode,
   generateQuestionsForCategory,
   evaluateRound,
@@ -35,6 +37,64 @@ test('ELO rating calculations match FIDE formulas', () => {
   // Floor at 100
   assert.equal(applyElo(105, -50), 100);
   assert.equal(applyElo(1200, 20), 1220);
+
+  // Verification that calculateMultiplayerEloChanges for N = 2 matches standard FIDE 1v1 exactly
+  const mpTwoPlayers = [
+    { uid: 'alice', elo: 1200, score: 5000 },
+    { uid: 'bob', elo: 1200, score: 3000 },
+  ];
+  const mpDeltas = calculateMultiplayerEloChanges(mpTwoPlayers);
+  assert.equal(mpDeltas.alice, 16, 'N=2 winner delta must be +16');
+  assert.equal(mpDeltas.bob, -16, 'N=2 loser delta must be -16');
+});
+
+test('Multiplayer All-play-all ELO distributes points fairly for 10 players', () => {
+  // 10 players, all starting at 1200 ELO with descending scores
+  const players = Array.from({ length: 10 }, (_, i) => ({
+    uid: `player_${i + 1}`,
+    elo: 1200,
+    score: (10 - i) * 1000, // 10000, 9000, ..., 1000
+  }));
+
+  const changes = calculateMultiplayerEloChanges(players);
+
+  // Winner (player_1) beat all 9 opponents
+  assert.equal(changes['player_1'], 16, '1st place winner should gain +16 ELO');
+
+  // Last place (player_10) lost to all 9 opponents
+  assert.equal(changes['player_10'], -16, '10th place should lose -16 ELO');
+
+  // Middle players (e.g. 5th and 6th) should be near balanced
+  assert.equal(changes['player_5'], 2, '5th place should have small positive delta');
+  assert.equal(changes['player_6'], -2, '6th place should have small negative delta');
+
+  // Conservation: total delta sum across all 10 players must equal 0 (no ELO inflation)
+  const sumDeltas = Object.values(changes).reduce((a, b) => a + b, 0);
+  assert.equal(sumDeltas, 0, 'Sum of all ELO changes in all-play-all must be exactly 0');
+});
+
+test('Time-based scoring awards points based on speed and penalizes incorrect answers', () => {
+  // 0.5s response time (500ms): round(1000 * (1 - 500/8000)) = round(1000 * 0.9375) = 938
+  const fastPoints = calculateTimePoints(true, 500);
+  assert.equal(fastPoints, 938, 'Fast response (0.5s) should award ~938 points');
+
+  // 6.0s response time (6000ms): round(1000 * (1 - 6000/8000)) = round(1000 * 0.25) = 250
+  const slowPoints = calculateTimePoints(true, 6000);
+  assert.equal(slowPoints, 250, 'Slow response (6s) should award 250 points');
+
+  // 8.0s timeout response (8000ms): floor factor 0.2 -> 200 points
+  const floorPoints = calculateTimePoints(true, 8000);
+  assert.equal(floorPoints, 200, 'Boundary response (8s) should award floor of 200 points');
+
+  // Beyond 8s clamped to 0.2 -> 200 points
+  const clampedPoints = calculateTimePoints(true, 12000);
+  assert.equal(clampedPoints, 200, 'Response > 8s clamped to 200 points');
+
+  // Wrong answer is always penalized with -250 points
+  const wrongFast = calculateTimePoints(false, 300);
+  const wrongSlow = calculateTimePoints(false, 7000);
+  assert.equal(wrongFast, -250, 'Wrong answer should always deduct -250 points');
+  assert.equal(wrongSlow, -250, 'Wrong answer should always deduct -250 points');
 });
 
 test('Lobby code generator produces 4 alphanumeric uppercase characters', () => {
@@ -93,7 +153,7 @@ test('P2 Fix: Valid alternative Japanese answers are accepted and never used as 
   assert.equal(isAnswerCorrect(question, 'へ'), true, 'へ must be accepted');
   assert.equal(isAnswerCorrect(question, 'で'), false, 'で is wrong');
 
-  // Verify in round evaluation that answering へ yields +1 point and NOT -1 penalty
+  // Verify in round evaluation that answering へ yields points (> 0) and NOT -250 penalty
   const testGame = {
     questions: [question],
     currentRoundIndex: 0,
@@ -107,7 +167,11 @@ test('P2 Fix: Valid alternative Japanese answers are accepted and never used as 
   };
 
   const roundAfterHe = evaluateRound(testGame, 'alice', 'へ', 2000);
-  assert.equal(roundAfterHe.scores.alice, 1, 'Alice must receive +1 point for valid answer へ');
+  assert.equal(
+    roundAfterHe.scores.alice,
+    875,
+    'Alice receives time points (875p) for valid answer へ',
+  );
   assert.equal(roundAfterHe.roundWinners[0], 'alice', 'Alice is marked as round winner');
 });
 
@@ -133,6 +197,7 @@ test('P1 Fix: Late answers cannot modify closed rounds or expired rounds', () =>
     roundStartTime: 1000, // Round starts at t=1000
     hostUid: 'alice',
     guestUid: 'bob',
+    playerUids: ['alice', 'bob'],
     scores: { alice: 0, bob: 0 },
     answers: {},
     roundWinners: {},
@@ -144,29 +209,24 @@ test('P1 Fix: Late answers cannot modify closed rounds or expired rounds', () =>
   assert.equal(premature.scores.alice, 0, 'No points awarded before roundStartTime');
   assert(!premature.answers?.[0]?.alice, 'Answer not recorded before roundStartTime');
 
-  // 2. Bob answers correctly at t=2000 and wins round 0
-  const afterBobWin = evaluateRound(game, 'bob', 'B', 2000);
-  assert.equal(afterBobWin.scores.bob, 1);
-  assert.equal(afterBobWin.roundWinners[0], 'bob');
-  assert.equal(afterBobWin.status, 'round_end');
+  // 2. Both players answer in round 0: Bob answers correctly at t=2000, Alice at t=2500
+  const afterBob = evaluateRound(game, 'bob', 'B', 2000);
+  assert.equal(afterBob.scores.bob, 875);
+  assert.equal(afterBob.status, 'playing', 'Round still active waiting for Alice');
 
-  // 3. Alice submits late (wrong answer 'A') AFTER Bob already won the round
-  const aliceLateWrong = evaluateRound(afterBobWin, 'alice', 'A', 2500);
+  const afterBoth = evaluateRound(afterBob, 'alice', 'A', 2500);
+  assert.equal(afterBoth.scores.alice, -250, 'Alice penalized -250');
   assert.equal(
-    aliceLateWrong.scores.alice,
-    0,
-    'Alice must NOT receive -1 penalty after round is already won',
+    afterBoth.status,
+    'round_end',
+    'Round ends adaptively when all players have answered',
   );
 
-  // 4. Alice submits late (correct answer 'B') AFTER Bob already won the round
-  const aliceLateCorrect = evaluateRound(afterBobWin, 'alice', 'B', 2500);
-  assert.equal(
-    aliceLateCorrect.scores.alice,
-    0,
-    'Alice must NOT receive +1 point after round is already won',
-  );
+  // 3. Late submit after round is closed (round_end) cannot modify scores
+  const lateAttempt = evaluateRound(afterBoth, 'bob', 'B', 3000);
+  assert.equal(lateAttempt.scores.bob, 875, 'Score not modified after round closed');
 
-  // 5. Test round timeout (> ROUND_TIME_MS)
+  // 4. Test round timeout (> ROUND_TIME_MS)
   const freshGame = {
     questions: [
       {
@@ -205,7 +265,7 @@ test('Vocab category draws from parsed Genki vocabulary dataset', () => {
   );
 });
 
-test('Round evaluation: fastest correct answer receives +1 point, wrong answer receives -1 point', () => {
+test('Round evaluation: time-based scoring and adaptive round completion when all players answered', () => {
   const mockGame = {
     questions: [
       {
@@ -227,6 +287,7 @@ test('Round evaluation: fastest correct answer receives +1 point, wrong answer r
     roundStartTime: 1000,
     hostUid: 'alice',
     guestUid: 'bob',
+    playerUids: ['alice', 'bob'],
     hostElo: 1200,
     guestElo: 1200,
     scores: { alice: 0, bob: 0 },
@@ -235,25 +296,32 @@ test('Round evaluation: fastest correct answer receives +1 point, wrong answer r
     status: 'playing',
   };
 
-  // Alice answers wrong first ('A')
+  // Alice answers wrong first ('A') at t=2000 (elapsed 1000ms)
   const afterAliceWrong = evaluateRound(mockGame, 'alice', 'A', 2000);
   assert.equal(
     afterAliceWrong.scores.alice,
-    -1,
-    'Alice receives -1 point penalty for wrong answer',
+    -250,
+    'Alice receives -250 points penalty for wrong answer',
   );
-  assert.equal(afterAliceWrong.roundWinners[0], undefined, 'No round winner yet');
-  assert.equal(afterAliceWrong.status, 'playing', 'Round still active since no one answered right');
+  assert.equal(
+    afterAliceWrong.status,
+    'playing',
+    'Round still active since Bob has not answered yet',
+  );
 
-  // Bob answers right ('B')
+  // Bob answers right ('B') at t=3000 (elapsed 2000ms) -> round(1000 * (1 - 2000/8000)) = 750 points
   const afterBobCorrect = evaluateRound(afterAliceWrong, 'bob', 'B', 3000);
-  assert.equal(afterBobCorrect.scores.bob, 1, 'Bob receives +1 point for correct answer');
+  assert.equal(afterBobCorrect.scores.bob, 750, 'Bob receives 750 time-based points');
   assert.equal(afterBobCorrect.roundWinners[0], 'bob', 'Bob is marked as round winner');
-  assert.equal(afterBobCorrect.status, 'round_end', 'Round ends when someone gets it right');
+  assert.equal(
+    afterBobCorrect.status,
+    'round_end',
+    'Round ends adaptively as soon as both players have answered',
+  );
 
   // Alice cannot answer again in this round
   const aliceRetry = evaluateRound(afterBobCorrect, 'alice', 'B', 3500);
-  assert.equal(aliceRetry.scores.alice, -1, 'Alice score should not change on duplicate submit');
+  assert.equal(aliceRetry.scores.alice, -250, 'Alice score should not change on duplicate submit');
 
   // Advance to next round
   const round2 = advanceToNextRound(afterBobCorrect, 4000);
@@ -261,12 +329,14 @@ test('Round evaluation: fastest correct answer receives +1 point, wrong answer r
   assert.equal(round2.status, 'playing');
   assert.equal(round2.roundWinner, null);
 
-  // Round 2 is last round: Bob gets it right again ('C')
-  const finalGame = evaluateRound(round2, 'bob', 'C', 5000);
-  assert.equal(finalGame.status, 'finished', 'Match finishes on final question');
-  assert.equal(finalGame.winnerUid, 'bob', 'Bob wins the match');
-  assert.equal(finalGame.scores.bob, 2);
-  assert.equal(finalGame.scores.alice, -1);
+  // Round 2 (last round): both players answer
+  const round2Alice = evaluateRound(round2, 'alice', 'C', 4500); // correct: 1000 - 500/8000 * 1000 = 938
+  const finalGame = evaluateRound(round2Alice, 'bob', 'C', 5000); // correct: 1000 - 1000/8000 * 1000 = 875
+
+  assert.equal(finalGame.status, 'finished', 'Match finishes on final question after all answered');
+  assert.equal(finalGame.scores.bob, 750 + 875);
+  assert.equal(finalGame.scores.alice, -250 + 938);
+  assert.equal(finalGame.winnerUid, 'bob', 'Bob wins the match with higher score');
   assert(finalGame.eloChanges.bob > 0, 'Bob gains ELO');
   assert(finalGame.eloChanges.alice < 0, 'Alice loses ELO');
 });
@@ -286,9 +356,10 @@ test('Match finalization properly handles draws with equal scores', () => {
     roundStartTime: 1000,
     hostUid: 'alice',
     guestUid: 'bob',
+    playerUids: ['alice', 'bob'],
     hostElo: 1200,
     guestElo: 1200,
-    scores: { alice: 1, bob: 1 },
+    scores: { alice: 1000, bob: 1000 },
     answers: {},
     roundWinners: {},
     status: 'playing',

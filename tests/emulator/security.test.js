@@ -158,3 +158,69 @@ test('auth emulator issues isolated identities and rejects a wrong password', as
   });
   assert.equal(wrong.status, 400);
 });
+test('lobbies 10-players: enforces max 10 player capacity and allows individual answers subcollection writes', async () => {
+  const host = env.authenticatedContext('host1').firestore();
+  const players = Array.from({ length: 10 }, (_, i) =>
+    env.authenticatedContext(`p${i + 1}`).firestore(),
+  );
+  const outsider = env.authenticatedContext('p11').firestore();
+
+  // Host creates lobby with 1 player
+  await assertSucceeds(
+    setDoc(doc(host, 'lobbies/party1'), {
+      host: { uid: 'host1' },
+      players: { host1: { uid: 'host1' } },
+      playerCount: 1,
+      status: 'waiting',
+    }),
+  );
+
+  // Players 1 to 9 join (total 10 players)
+  let currentPlayers = { host1: { uid: 'host1' } };
+  for (let i = 0; i < 9; i++) {
+    const uid = `p${i + 1}`;
+    currentPlayers = { ...currentPlayers, [uid]: { uid } };
+    await assertSucceeds(
+      updateDoc(doc(players[i], 'lobbies/party1'), {
+        players: currentPlayers,
+        playerCount: i + 2,
+      }),
+    );
+  }
+
+  // 11th player tries to join: must fail because playerCount > 10
+  const overflowPlayers = { ...currentPlayers, p11: { uid: 'p11' } };
+  await assertFails(
+    updateDoc(doc(outsider, 'lobbies/party1'), {
+      players: overflowPlayers,
+      playerCount: 11,
+    }),
+  );
+
+  // Subcollection answers: p1 can write their own answer
+  await assertSucceeds(
+    setDoc(doc(players[0], 'lobbies/party1/answers/0_p1'), {
+      roundIndex: 0,
+      uid: 'p1',
+      answer: 'A',
+      timestamp: 1000,
+      isCorrect: true,
+      pointsAwarded: 950,
+    }),
+  );
+
+  // p1 cannot write an answer for p2
+  await assertFails(
+    setDoc(doc(players[0], 'lobbies/party1/answers/0_p2'), {
+      roundIndex: 0,
+      uid: 'p2',
+      answer: 'B',
+      timestamp: 1000,
+      isCorrect: false,
+      pointsAwarded: -250,
+    }),
+  );
+
+  // p2 can read p1's answer
+  await assertSucceeds(getDoc(doc(players[1], 'lobbies/party1/answers/0_p1')));
+});

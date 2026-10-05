@@ -18,12 +18,14 @@ import { normalize } from './engine.js';
 export const DEFAULT_ELO = 1200;
 export const K_FACTOR = 32;
 export const ROUND_TIME_MS = 8000;
-export const ROUND_PAUSE_MS = 1500;
+export const ROUND_PAUSE_MS = 2000;
 export const QUESTIONS_PER_MATCH = 10;
+export const MAX_PLAYERS = 10;
+export const MIN_PLAYERS = 2;
 export const HEARTBEAT_TTL_MS = 45000; // 45s heartbeat timeout for lobbies
 
 /**
- * Calculates ELO change based on standard FIDE Elo rating formula.
+ * Calculates ELO change based on standard FIDE Elo rating formula for 1v1.
  * @param {number} playerElo
  * @param {number} opponentElo
  * @param {number} scoreOutcome - 1 for win, 0.5 for draw, 0 for loss
@@ -37,10 +39,76 @@ export function calculateEloChange(playerElo, opponentElo, scoreOutcome) {
 }
 
 /**
+ * Calculates All-play-all ELO changes for 2 to 10 players.
+ * Formula for player i:
+ *   delta_i = round( (K / (N - 1)) * sum_{j != i} (S_ij - E_ij) )
+ *   where E_ij = 1 / (1 + 10^((R_j - R_i) / 400))
+ *   and S_ij = 1 (if score_i > score_j), 0.5 (if score_i == score_j), 0 (if score_i < score_j).
+ * @param {Array<{ uid: string, elo?: number, score?: number }> | Record<string, { elo?: number, score?: number }>} players
+ * @param {Record<string, number>} [scoresOverride]
+ * @returns {Record<string, number>} Map of uid -> integer ELO delta
+ */
+export function calculateMultiplayerEloChanges(players, scoresOverride = null) {
+  let playerList = [];
+  if (Array.isArray(players)) {
+    playerList = players.map((p) => ({
+      uid: p.uid,
+      elo: p.elo || DEFAULT_ELO,
+      score: scoresOverride ? (scoresOverride[p.uid] ?? 0) : (p.score ?? 0),
+    }));
+  } else if (players && typeof players === 'object') {
+    playerList = Object.entries(players).map(([uid, p]) => ({
+      uid,
+      elo: p.elo || DEFAULT_ELO,
+      score: scoresOverride ? (scoresOverride[uid] ?? 0) : (p.score ?? 0),
+    }));
+  }
+
+  const n = playerList.length;
+  const result = {};
+  if (n <= 1) {
+    for (const p of playerList) result[p.uid] = 0;
+    return result;
+  }
+
+  for (let i = 0; i < n; i++) {
+    const pi = playerList[i];
+    let sum = 0;
+    for (let j = 0; j < n; j++) {
+      if (i === j) continue;
+      const pj = playerList[j];
+      const expected = 1 / (1 + Math.pow(10, (pj.elo - pi.elo) / 400));
+      let outcome = 0.5;
+      if (pi.score > pj.score) outcome = 1;
+      else if (pi.score < pj.score) outcome = 0;
+      sum += outcome - expected;
+    }
+    result[pi.uid] = Math.round((K_FACTOR / (n - 1)) * sum);
+  }
+
+  return result;
+}
+
+/**
  * Applies ELO delta with a minimum floor of 100.
  */
 export function applyElo(currentElo, delta) {
   return Math.max(100, Math.round((currentElo || DEFAULT_ELO) + delta));
+}
+
+/**
+ * Calculates time-based points for a round response:
+ * - Correct: round(1000 * max(0.2, 1 - responseTimeMs / 8000)) (200 to 1000 points)
+ * - Incorrect: -250 points penalty
+ * @param {boolean} isCorrect
+ * @param {number} responseTimeMs
+ * @returns {number} Points awarded (positive or negative)
+ */
+export function calculateTimePoints(isCorrect, responseTimeMs) {
+  if (!isCorrect) return -250;
+  const clampedTime = Math.max(0, responseTimeMs || 0);
+  const factor = Math.max(0.2, 1 - clampedTime / ROUND_TIME_MS);
+  return Math.round(1000 * factor);
 }
 
 /**
@@ -324,8 +392,13 @@ function generateWordOrderQuestions(count) {
  * 1. game.status === 'playing'
  * 2. now >= game.roundStartTime (countdown completed)
  * 3. now - game.roundStartTime <= ROUND_TIME_MS (not expired)
- * 4. !game.roundWinners[roundIdx] (not already won by opponent)
- * 5. !game.answers[roundIdx][uid] (not already answered by this player)
+ * 4. !game.answers[roundIdx][uid] (not already answered by this player)
+ *
+ * Awards time-based points:
+ * - Correct: round(1000 * max(0.2, 1 - responseTimeMs / 8000))
+ * - Incorrect: -250 penalty
+ *
+ * Adaptively ends round when all active players have answered.
  */
 export function evaluateRound(game, uid, selectedAnswer, now = Date.now()) {
   if (!game || game.status !== 'playing') return game;
@@ -344,39 +417,36 @@ export function evaluateRound(game, uid, selectedAnswer, now = Date.now()) {
     return game;
   }
 
-  // 3. Guard against submissions after round has already been won
-  if (game.roundWinners && game.roundWinners[roundIdx]) {
-    return game;
-  }
-
-  // 4. Guard against duplicate submission from same user in this round
+  // 3. Guard against duplicate submission from same user in this round
   const roundAnswers = { ...(game.answers?.[roundIdx] || {}) };
   if (roundAnswers[uid]) {
     return game;
   }
 
   const isCorrect = isAnswerCorrect(currentQ, selectedAnswer);
+  const responseTimeMs = Math.max(0, now - (game.roundStartTime || now));
+  const pointsAwarded = calculateTimePoints(isCorrect, responseTimeMs);
 
   roundAnswers[uid] = {
     answer: selectedAnswer,
     timestamp: now,
     isCorrect,
+    pointsAwarded,
   };
 
-  const newScores = { ...game.scores };
+  const newScores = { ...(game.scores || {}) };
+  newScores[uid] = (newScores[uid] || 0) + pointsAwarded;
+
   const roundWinners = { ...(game.roundWinners || {}) };
   let roundWinner = game.roundWinner || null;
 
-  if (isCorrect) {
+  if (isCorrect && !roundWinners[roundIdx]) {
     roundWinners[roundIdx] = uid;
     roundWinner = uid;
-    newScores[uid] = (newScores[uid] || 0) + 1;
-  } else {
-    newScores[uid] = (newScores[uid] || 0) - 1;
   }
 
   const answers = { ...(game.answers || {}), [roundIdx]: roundAnswers };
-  const updated = {
+  let updated = {
     ...game,
     scores: newScores,
     answers,
@@ -384,18 +454,27 @@ export function evaluateRound(game, uid, selectedAnswer, now = Date.now()) {
     roundWinner,
   };
 
-  const hostUid = game.hostUid;
-  const guestUid = game.guestUid;
-  const bothAnswered = Boolean(roundAnswers[hostUid] && roundAnswers[guestUid]);
-  const hasWinner = Boolean(roundWinners[roundIdx]);
+  // Determine all active participants
+  const playerUids =
+    game.playerUids ||
+    (game.players ? Object.keys(game.players) : [game.hostUid, game.guestUid].filter(Boolean));
 
-  if (hasWinner || bothAnswered) {
+  const allAnswered =
+    playerUids.length > 0
+      ? playerUids.every((id) => Boolean(roundAnswers[id]))
+      : Object.keys(newScores).length > 0 &&
+        Object.keys(newScores).every((id) => Boolean(roundAnswers[id]));
+
+  if (allAnswered) {
     if (roundIdx >= game.questions.length - 1) {
       return finalizeMatch(updated, now);
     } else {
-      updated.status = 'round_end';
-      updated.roundEndAt = now;
-      updated.nextRoundAt = now + ROUND_PAUSE_MS;
+      updated = {
+        ...updated,
+        status: 'round_end',
+        roundEndAt: now,
+        nextRoundAt: now + ROUND_PAUSE_MS,
+      };
     }
   }
 
@@ -423,32 +502,46 @@ export function advanceToNextRound(game, now = Date.now()) {
 }
 
 /**
- * Finalizes match, calculates winner and ELO ratings.
+ * Finalizes match, calculates winner, leaderboards and All-play-all ELO ratings for 2–10 players.
  */
-export function finalizeMatch(game, now = Date.now()) {
-  const hostUid = game.hostUid;
-  const guestUid = game.guestUid;
-  const hostScore = game.scores[hostUid] || 0;
-  const guestScore = game.scores[guestUid] || 0;
-
-  let winnerUid = null;
-  let isDraw = false;
-  if (hostScore > guestScore) {
-    winnerUid = hostUid;
-  } else if (guestScore > hostScore) {
-    winnerUid = guestUid;
-  } else {
-    isDraw = true;
+export function finalizeMatch(game, now = Date.now(), playersMap = null) {
+  const playersSource = playersMap || game.players || {};
+  let uids = Object.keys(game.scores || {});
+  if (uids.length === 0) {
+    if (game.hostUid) uids.push(game.hostUid);
+    if (game.guestUid) uids.push(game.guestUid);
+  }
+  if (uids.length === 0 && playersSource) {
+    uids = Object.keys(playersSource);
   }
 
-  const hostElo = game.hostElo || DEFAULT_ELO;
-  const guestElo = game.guestElo || DEFAULT_ELO;
+  const playersList = uids.map((uid) => {
+    const p = playersSource[uid] || {};
+    const elo = p.elo || (uid === game.hostUid ? game.hostElo : game.guestElo) || DEFAULT_ELO;
+    const score = game.scores?.[uid] ?? p.score ?? 0;
+    return { uid, elo, score };
+  });
 
-  const hostOutcome = winnerUid === hostUid ? 1 : isDraw ? 0.5 : 0;
-  const guestOutcome = winnerUid === guestUid ? 1 : isDraw ? 0.5 : 0;
+  const scoresList = playersList.map((p) => p.score);
+  const maxScore = scoresList.length > 0 ? Math.max(...scoresList) : 0;
+  const topPlayers = playersList.filter((p) => p.score === maxScore);
+  const isDraw = topPlayers.length > 1;
+  const winnerUid = isDraw || topPlayers.length === 0 ? null : topPlayers[0].uid;
 
-  const hostDiff = calculateEloChange(hostElo, guestElo, hostOutcome);
-  const guestDiff = calculateEloChange(guestElo, hostElo, guestOutcome);
+  const eloChanges = calculateMultiplayerEloChanges(playersList);
+
+  const leaderboardSnapshot = playersList
+    .map((p) => {
+      const info = playersSource[p.uid] || {};
+      return {
+        uid: p.uid,
+        displayName: info.displayName || (p.uid === game.hostUid ? 'Värd' : 'Spelare'),
+        photoURL: info.photoURL || null,
+        score: p.score,
+        roundPoints: game.answers?.[game.currentRoundIndex]?.[p.uid]?.pointsAwarded || 0,
+      };
+    })
+    .sort((a, b) => b.score - a.score);
 
   return {
     ...game,
@@ -456,10 +549,8 @@ export function finalizeMatch(game, now = Date.now()) {
     winnerUid,
     isDraw,
     finishedAt: now,
-    eloChanges: {
-      [hostUid]: hostDiff,
-      [guestUid]: guestDiff,
-    },
+    eloChanges,
+    leaderboardSnapshot,
   };
 }
 
@@ -494,6 +585,9 @@ async function ensureLeaderboardProfile(user) {
   });
 }
 
+/**
+ * Creates a multiplayer lobby supporting up to 10 players.
+ */
 export async function createLobby(user, category) {
   if (!user || !user.uid) throw new Error('Inloggning krävs');
   const code = generateLobbyCode();
@@ -516,6 +610,17 @@ export async function createLobby(user, category) {
       photoURL: user.photoURL || null,
       elo: hostElo,
     },
+    players: {
+      [user.uid]: {
+        uid: user.uid,
+        displayName: user.displayName || 'Spelare 1',
+        photoURL: user.photoURL || null,
+        elo: hostElo,
+        joinedAt: now,
+        score: 0,
+      },
+    },
+    playerCount: 1,
     guest: null,
     game: null,
   };
@@ -533,7 +638,7 @@ export async function sendHeartbeat(lobbyId, uid) {
     const lobbyRef = doc(db, 'lobbies', lobbyId);
     await runTransaction(db, async (tx) => {
       const snap = await tx.get(lobbyRef);
-      if (snap.exists() && snap.data().status === 'waiting' && snap.data().host.uid === uid) {
+      if (snap.exists() && snap.data().status === 'waiting' && snap.data().host?.uid === uid) {
         tx.update(lobbyRef, { heartbeat: Date.now(), updatedAt: Date.now() });
       }
     });
@@ -541,7 +646,7 @@ export async function sendHeartbeat(lobbyId, uid) {
 }
 
 /**
- * Joins an existing lobby as guest.
+ * Joins an existing lobby (supports up to 10 players).
  */
 export async function joinLobby(lobbyId, user) {
   if (!user || !user.uid) throw new Error('Inloggning krävs');
@@ -558,17 +663,57 @@ export async function joinLobby(lobbyId, user) {
     if (data.status !== 'waiting') throw new Error('Matchen har redan startat');
     if (Date.now() - (data.heartbeat || data.createdAt || 0) >= HEARTBEAT_TTL_MS)
       throw new Error('Lobbyn är inte längre aktiv');
-    if (data.host.uid === user.uid) return data;
-    if (data.guest && data.guest.uid !== user.uid) throw new Error('Lobbyn är redan full');
 
+    const currentPlayers = data.players || {
+      [data.host.uid]: {
+        uid: data.host.uid,
+        displayName: data.host.displayName,
+        photoURL: data.host.photoURL || null,
+        elo: data.host.elo || DEFAULT_ELO,
+        joinedAt: data.createdAt || Date.now(),
+        score: 0,
+      },
+    };
+
+    if (currentPlayers[user.uid]) return data;
+
+    const count = Object.keys(currentPlayers).length;
+    if (count >= MAX_PLAYERS || (data.playerCount && data.playerCount >= MAX_PLAYERS)) {
+      throw new Error('Lobbyn är redan full (max 10 spelare)');
+    }
+
+    const now = Date.now();
     const guestData = {
       uid: user.uid,
-      displayName: user.displayName || 'Spelare 2',
+      displayName: user.displayName || `Spelare ${count + 1}`,
       photoURL: user.photoURL || null,
       elo: guestElo,
+      joinedAt: now,
+      score: 0,
     };
-    tx.update(lobbyRef, { guest: guestData, updatedAt: Date.now() });
-    return { ...data, guest: guestData };
+
+    const updatedPlayers = {
+      ...currentPlayers,
+      [user.uid]: guestData,
+    };
+
+    const updatePayload = {
+      players: updatedPlayers,
+      playerCount: Object.keys(updatedPlayers).length,
+      updatedAt: now,
+    };
+
+    if (!data.guest) {
+      updatePayload.guest = {
+        uid: user.uid,
+        displayName: user.displayName || 'Spelare 2',
+        photoURL: user.photoURL || null,
+        elo: guestElo,
+      };
+    }
+
+    tx.update(lobbyRef, updatePayload);
+    return { ...data, ...updatePayload };
   });
 }
 
@@ -584,11 +729,12 @@ export async function leaveLobby(lobbyId, uid) {
       if (!snap.exists()) return;
       const data = snap.data();
 
-      if (data.host.uid !== uid && data.guest?.uid !== uid) return;
+      const isHost = data.host?.uid === uid;
+      const isPlayer = Boolean(data.players?.[uid] || data.guest?.uid === uid || isHost);
+      if (!isPlayer) return;
 
       // If in progress or finished, forfeiting or exiting
       if (data.game && data.game.status !== 'finished' && data.status !== 'waiting') {
-        // Player forfeits match
         await applyForfeitInTransaction(tx, lobbyRef, data, uid, Date.now());
         return;
       }
@@ -597,11 +743,24 @@ export async function leaveLobby(lobbyId, uid) {
         return; // Already recorded
       }
 
-      // Waiting status: cleanup
-      if (data.host.uid === uid) {
+      // Waiting status: host leaving deletes lobby, other players leaving removes them
+      if (isHost) {
         tx.delete(lobbyRef);
-      } else if (data.guest?.uid === uid) {
-        tx.update(lobbyRef, { guest: null, updatedAt: Date.now() });
+      } else {
+        const updatedPlayers = { ...(data.players || {}) };
+        delete updatedPlayers[uid];
+        const newCount = Object.keys(updatedPlayers).length;
+        const newGuest =
+          data.guest?.uid === uid
+            ? Object.values(updatedPlayers).find((p) => p.uid !== data.host.uid) || null
+            : data.guest;
+
+        tx.update(lobbyRef, {
+          players: updatedPlayers,
+          playerCount: newCount,
+          guest: newGuest,
+          updatedAt: Date.now(),
+        });
       }
     });
   } catch (err) {
@@ -611,6 +770,7 @@ export async function leaveLobby(lobbyId, uid) {
 
 /**
  * Starts match by initializing 10 questions and starting countdown.
+ * Host can start match as soon as at least 2 players have joined.
  */
 export async function startMatch(lobbyId) {
   const lobbyRef = doc(db, 'lobbies', lobbyId);
@@ -619,22 +779,40 @@ export async function startMatch(lobbyId) {
     if (!snap.exists()) throw new Error('Lobbyn finns inte');
     const data = snap.data();
     if (data.status !== 'waiting') return data.game;
-    if (!data.guest) throw new Error('Väntar på att en motståndare ansluter');
+
+    const playersMap = data.players || {
+      [data.host.uid]: { ...data.host, joinedAt: Date.now(), score: 0 },
+      ...(data.guest
+        ? { [data.guest.uid]: { ...data.guest, joinedAt: Date.now(), score: 0 } }
+        : {}),
+    };
+
+    const count = Object.keys(playersMap).length;
+    if (count < MIN_PLAYERS) {
+      throw new Error('Väntar på att minst en till motståndare ansluter');
+    }
 
     const questionsList = generateQuestionsForCategory(data.category, QUESTIONS_PER_MATCH);
     const now = Date.now();
+
+    const initialScores = {};
+    for (const pUid of Object.keys(playersMap)) {
+      initialScores[pUid] = 0;
+    }
+
+    const guestUid =
+      data.guest?.uid || Object.keys(playersMap).find((id) => id !== data.host.uid) || null;
+
     const game = {
       questions: questionsList,
       currentRoundIndex: 0,
       roundStartTime: now + 3000, // 3s countdown before first round
       hostUid: data.host.uid,
-      guestUid: data.guest.uid,
+      guestUid,
       hostElo: data.host.elo || DEFAULT_ELO,
-      guestElo: data.guest.elo || DEFAULT_ELO,
-      scores: {
-        [data.host.uid]: 0,
-        [data.guest.uid]: 0,
-      },
+      guestElo: data.guest?.elo || DEFAULT_ELO,
+      playerUids: Object.keys(playersMap),
+      scores: initialScores,
       answers: {},
       roundWinners: {},
       roundWinner: null,
@@ -652,10 +830,14 @@ export async function startMatch(lobbyId) {
 
 /**
  * Submits an answer in the current round.
- * Atomically updates round outcome and, if final question, writes leaderboard for BOTH players.
+ * Writes atomically to `/lobbies/{lobbyId}/answers/{roundIndex}_{uid}`
+ * and updates game state in transaction.
+ * If all connected players have answered or if last round finishes, updates standings.
  */
-export async function submitAnswer(lobbyId, uid, roundIndex, selectedAnswer) {
+export async function submitPlayerAnswer(lobbyId, uid, roundIndex, selectedAnswer) {
+  const answerRef = doc(db, 'lobbies', lobbyId, 'answers', `${roundIndex}_${uid}`);
   const lobbyRef = doc(db, 'lobbies', lobbyId);
+
   return runTransaction(db, async (tx) => {
     const snap = await tx.get(lobbyRef);
     if (!snap.exists()) return null;
@@ -670,25 +852,99 @@ export async function submitAnswer(lobbyId, uid, roundIndex, selectedAnswer) {
     if (game.currentRoundIndex !== roundIndex) return null;
     if (game.roundStartTime && now < game.roundStartTime) return null;
     if (game.roundStartTime && now - game.roundStartTime > ROUND_TIME_MS) return null;
-    if (game.roundWinners?.[roundIndex]) return null;
     if (game.answers?.[roundIndex]?.[uid]) return null;
 
-    const updatedGame = evaluateRound(game, uid, selectedAnswer, now);
-    const isFinished = updatedGame.status === 'finished';
+    const currentQ = game.questions?.[roundIndex];
+    if (!currentQ) return null;
 
-    if (isFinished) {
-      await finishMatchInTransaction(tx, lobbyRef, lobbyId, updatedGame, now);
-    } else {
-      tx.update(lobbyRef, {
-        game: updatedGame,
-        status: updatedGame.status,
-        updatedAt: now,
-      });
+    const isCorrect = isAnswerCorrect(currentQ, selectedAnswer);
+    const responseTimeMs = Math.max(0, now - (game.roundStartTime || now));
+    const pointsAwarded = calculateTimePoints(isCorrect, responseTimeMs);
+
+    // Atomically write answer document in subcollection
+    const answerDoc = {
+      roundIndex,
+      uid,
+      answer: selectedAnswer,
+      timestamp: now,
+      isCorrect,
+      pointsAwarded,
+    };
+    tx.set(answerRef, answerDoc);
+
+    // Update in-memory round answers & scores
+    const roundAnswers = { ...(game.answers?.[roundIndex] || {}) };
+    roundAnswers[uid] = answerDoc;
+
+    const newScores = { ...(game.scores || {}) };
+    newScores[uid] = (newScores[uid] || 0) + pointsAwarded;
+
+    const updatedPlayers = { ...(data.players || {}) };
+    if (updatedPlayers[uid]) {
+      updatedPlayers[uid] = {
+        ...updatedPlayers[uid],
+        score: newScores[uid],
+      };
     }
+
+    const roundWinners = { ...(game.roundWinners || {}) };
+    let roundWinner = game.roundWinner || null;
+    if (isCorrect && !roundWinners[roundIndex]) {
+      roundWinners[roundIndex] = uid;
+      roundWinner = uid;
+    }
+
+    let updatedGame = {
+      ...game,
+      scores: newScores,
+      answers: { ...(game.answers || {}), [roundIndex]: roundAnswers },
+      roundWinners,
+      roundWinner,
+    };
+
+    const activeUids =
+      Object.keys(updatedPlayers).length > 0
+        ? Object.keys(updatedPlayers)
+        : game.playerUids || [game.hostUid, game.guestUid].filter(Boolean);
+
+    const allAnswered =
+      activeUids.length > 0 && activeUids.every((id) => Boolean(roundAnswers[id]));
+
+    if (allAnswered) {
+      if (roundIndex >= game.questions.length - 1) {
+        updatedGame = finalizeMatch(updatedGame, now, updatedPlayers);
+        await finishMatchInTransaction(tx, lobbyRef, lobbyId, updatedGame, now, updatedPlayers);
+        return updatedGame;
+      } else {
+        const leaderboardSnapshot = Object.values(updatedPlayers)
+          .map((p) => ({
+            uid: p.uid,
+            displayName: p.displayName,
+            photoURL: p.photoURL || null,
+            score: newScores[p.uid] || 0,
+            roundPoints: roundAnswers[p.uid]?.pointsAwarded || 0,
+          }))
+          .sort((a, b) => b.score - a.score);
+
+        updatedGame.leaderboardSnapshot = leaderboardSnapshot;
+        updatedGame.status = 'round_end';
+        updatedGame.roundEndAt = now;
+        updatedGame.nextRoundAt = now + ROUND_PAUSE_MS;
+      }
+    }
+
+    tx.update(lobbyRef, {
+      game: updatedGame,
+      players: updatedPlayers,
+      status: updatedGame.status,
+      updatedAt: now,
+    });
 
     return updatedGame;
   });
 }
+
+export const submitAnswer = submitPlayerAnswer;
 
 /**
  * Advances to next round if pause timer elapsed or handles round timeout.
@@ -702,26 +958,44 @@ export async function advanceRoundIfDue(lobbyId) {
     if (!data.game) return;
 
     const now = Date.now();
-    if (data.game.status === 'round_end' && data.game.nextRoundAt && now >= data.game.nextRoundAt) {
-      const nextGame = advanceToNextRound(data.game, now);
+    const game = data.game;
+
+    if (game.status === 'round_end' && game.nextRoundAt && now >= game.nextRoundAt) {
+      const nextGame = advanceToNextRound(game, now);
       tx.update(lobbyRef, {
         game: nextGame,
         status: nextGame.status,
         updatedAt: now,
       });
     } else if (
-      data.game.status === 'playing' &&
-      data.game.roundStartTime &&
-      now - data.game.roundStartTime > ROUND_TIME_MS
+      game.status === 'playing' &&
+      game.roundStartTime &&
+      now - game.roundStartTime > ROUND_TIME_MS
     ) {
-      const roundIdx = data.game.currentRoundIndex;
+      const roundIdx = game.currentRoundIndex || 0;
+      const roundAnswers = game.answers?.[roundIdx] || {};
+      const playersMap = data.players || {};
+      const scores = game.scores || {};
+
+      const leaderboardSnapshot = Object.values(playersMap)
+        .map((p) => ({
+          uid: p.uid,
+          displayName: p.displayName,
+          photoURL: p.photoURL || null,
+          score: scores[p.uid] || 0,
+          roundPoints: roundAnswers[p.uid]?.pointsAwarded || 0,
+        }))
+        .sort((a, b) => b.score - a.score);
+
       const updated = {
-        ...data.game,
-        roundWinner: data.game.roundWinners?.[roundIdx] || 'none',
+        ...game,
+        leaderboardSnapshot,
+        roundWinner: game.roundWinners?.[roundIdx] || 'none',
       };
-      if (roundIdx >= data.game.questions.length - 1) {
-        const finalGame = finalizeMatch(updated, now);
-        await finishMatchInTransaction(tx, lobbyRef, lobbyId, finalGame, now);
+
+      if (roundIdx >= game.questions.length - 1) {
+        const finalGame = finalizeMatch(updated, now, playersMap);
+        await finishMatchInTransaction(tx, lobbyRef, lobbyId, finalGame, now, playersMap);
       } else {
         updated.status = 'round_end';
         updated.roundEndAt = now;
@@ -741,18 +1015,43 @@ export async function advanceRoundIfDue(lobbyId) {
  */
 async function applyForfeitInTransaction(tx, lobbyRef, lobbyData, forfeitingUid, now) {
   const game = lobbyData.game;
+  const playersMap = lobbyData.players || {};
+  let uids = Object.keys(playersMap);
+  if (uids.length === 0) {
+    if (lobbyData.host?.uid) uids.push(lobbyData.host.uid);
+    if (lobbyData.guest?.uid) uids.push(lobbyData.guest.uid);
+  }
+
   const hostUid = lobbyData.host.uid;
-  const guestUid = lobbyData.guest.uid;
-  const winnerUid = forfeitingUid === hostUid ? guestUid : hostUid;
+  const guestUid =
+    lobbyData.guest?.uid ||
+    uids.find((id) => id !== hostUid) ||
+    (uids[0] !== hostUid ? uids[0] : null);
 
-  const hostElo = game?.hostElo || lobbyData.host.elo || DEFAULT_ELO;
-  const guestElo = game?.guestElo || lobbyData.guest.elo || DEFAULT_ELO;
+  let winnerUid = null;
+  const remainingUids = uids.filter((id) => id !== forfeitingUid);
+  if (remainingUids.length === 1) {
+    winnerUid = remainingUids[0];
+  } else if (remainingUids.length > 1) {
+    const scores = game?.scores || {};
+    winnerUid = remainingUids.reduce((best, curr) =>
+      (scores[curr] || 0) > (scores[best] || 0) ? curr : best,
+    );
+  }
 
-  const hostOutcome = winnerUid === hostUid ? 1 : 0;
-  const guestOutcome = winnerUid === guestUid ? 1 : 0;
+  const scores = { ...(game?.scores || {}) };
+  scores[forfeitingUid] = -9999; // Penalty for forfeit
 
-  const hostDiff = calculateEloChange(hostElo, guestElo, hostOutcome);
-  const guestDiff = calculateEloChange(guestElo, hostElo, guestOutcome);
+  const playersList = uids.map((uid) => ({
+    uid,
+    elo:
+      playersMap[uid]?.elo ||
+      (uid === hostUid ? lobbyData.host.elo : lobbyData.guest?.elo) ||
+      DEFAULT_ELO,
+    score: scores[uid] || 0,
+  }));
+
+  const eloChanges = calculateMultiplayerEloChanges(playersList);
 
   const finishedGame = {
     ...(game || {}),
@@ -761,37 +1060,50 @@ async function applyForfeitInTransaction(tx, lobbyRef, lobbyData, forfeitingUid,
     isDraw: false,
     forfeitedBy: forfeitingUid,
     finishedAt: now,
-    scores: game?.scores || { [hostUid]: 0, [guestUid]: 0 },
-    eloChanges: {
-      [hostUid]: hostDiff,
-      [guestUid]: guestDiff,
-    },
+    scores,
+    eloChanges,
   };
 
-  await finishMatchInTransaction(tx, lobbyRef, lobbyData.id, finishedGame, now);
+  await finishMatchInTransaction(tx, lobbyRef, lobbyData.id, finishedGame, now, playersMap);
 }
 
 /**
- * Atomically updates both players' leaderboard records in the transaction.
+ * Atomically updates all players' leaderboard records in the transaction.
  */
-async function finishMatchInTransaction(tx, lobbyRef, matchId, game, now) {
-  const hostUid = game.hostUid;
-  const guestUid = game.guestUid;
+async function finishMatchInTransaction(tx, lobbyRef, matchId, game, now, playersMap = null) {
+  const playersSource = playersMap || game.players || {};
+  let uids = Object.keys(game.scores || {});
+  if (uids.length === 0 && game.playerUids) {
+    uids = [...game.playerUids];
+  }
+  if (uids.length === 0) {
+    if (game.hostUid) uids.push(game.hostUid);
+    if (game.guestUid) uids.push(game.guestUid);
+  }
+  if (uids.length === 0 && playersSource) {
+    uids = Object.keys(playersSource);
+  }
+
+  // Deduplicate UIDs
+  const uniqueUids = [...new Set(uids.filter(Boolean))];
+
+  // Firestore requires every read before any write in a transaction.
+  const refs = uniqueUids.map((uid) => doc(db, 'leaderboard', uid));
+  const snapshots = await Promise.all(refs.map((ref) => tx.get(ref)));
+
   const winnerUid = game.winnerUid;
   const isDraw = game.isDraw;
 
-  // Firestore requires every read (including both profiles) before any write.
-  const refs = [hostUid, guestUid].map((uid) => doc(db, 'leaderboard', uid));
-  const snapshots = await Promise.all(refs.map((ref) => tx.get(ref)));
-  for (const [index, uid] of [hostUid, guestUid].entries()) {
+  for (const [index, uid] of uniqueUids.entries()) {
     const leadRef = refs[index];
     const snap = snapshots[index];
+    const pInfo = playersSource[uid] || {};
     const existing = snap.exists()
       ? snap.data()
       : {
           uid,
-          displayName: 'Spelare',
-          photoURL: null,
+          displayName: pInfo.displayName || 'Spelare',
+          photoURL: pInfo.photoURL || null,
           elo: DEFAULT_ELO,
           wins: 0,
           losses: 0,
@@ -840,19 +1152,21 @@ export function subscribeToLobby(lobbyId, callback, onError) {
 }
 
 /**
- * Subscribes to waiting lobbies in real time, filtering out abandoned/stale lobbies.
+ * Subscribes to waiting lobbies in real time, filtering out abandoned/full lobbies.
  */
 export function subscribeToOpenLobbies(callback, onError) {
-  // Limit the visible list after filtering, so abandoned rooms cannot hide live ones.
   const q = query(collection(db, 'lobbies'), where('status', '==', 'waiting'));
   let waiting = [];
   const publish = () => {
     const now = Date.now();
     callback(
       waiting
-        .filter(
-          (data) => !data.guest && now - (data.heartbeat || data.createdAt || 0) < HEARTBEAT_TTL_MS,
-        )
+        .filter((data) => {
+          const count = data.playerCount || (data.guest ? 2 : 1);
+          const isFull = count >= MAX_PLAYERS;
+          const isFresh = now - (data.heartbeat || data.createdAt || 0) < HEARTBEAT_TTL_MS;
+          return !isFull && isFresh;
+        })
         .sort((a, b) => b.createdAt - a.createdAt)
         .slice(0, 20),
     );
@@ -865,7 +1179,6 @@ export function subscribeToOpenLobbies(callback, onError) {
     },
     onError,
   );
-  // Expire rooms even when no further database updates arrive.
   const expiryTimer = setInterval(publish, 1000);
   return () => {
     unsubscribe();

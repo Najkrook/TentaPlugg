@@ -14,6 +14,8 @@ import {
   subscribeToLeaderboard,
   DEFAULT_ELO,
   ROUND_TIME_MS,
+  MAX_PLAYERS,
+  MIN_PLAYERS,
   HEARTBEAT_TTL_MS,
 } from '../multiplayer.js';
 
@@ -120,7 +122,7 @@ export function multiplayerView(ctx) {
       const now = Date.now();
       if (
         currentLobbyData?.status === 'waiting' &&
-        currentLobbyData.host.uid !== activeUserUid &&
+        currentLobbyData.host?.uid !== activeUserUid &&
         now - (currentLobbyData.heartbeat || currentLobbyData.createdAt || 0) >= HEARTBEAT_TTL_MS
       ) {
         resetMultiplayerView(activeUserUid);
@@ -152,7 +154,7 @@ export function multiplayerView(ctx) {
   if (
     activeLobbyId &&
     currentLobbyData?.status === 'waiting' &&
-    currentLobbyData.host.uid === activeUserUid &&
+    currentLobbyData.host?.uid === activeUserUid &&
     !heartbeatInterval
   ) {
     heartbeatInterval = setInterval(() => {
@@ -189,6 +191,7 @@ export function multiplayerView(ctx) {
 
   if (
     currentLobbyData.status === 'in_progress' ||
+    currentLobbyData.status === 'playing' ||
     currentLobbyData.game?.status === 'playing' ||
     currentLobbyData.game?.status === 'round_end'
   ) {
@@ -210,9 +213,12 @@ function unauthenticatedView(ctx) {
     <div class="multiplayer-container">
       <section class="page-heading">
         <div>
-          <p class="overline">MULTILÄGE · 1V1 RANKING</p>
-          <h1 tabindex="-1">Utmana kursare i realtid.</h1>
-          <p>Möt andra studenter i snabba 10-frågors dueller med officiellt ELO-betyg.</p>
+          <p class="overline">PARTY & ARENA · 2–10 SPELARE</p>
+          <h1 tabindex="-1">Utmana kursare i realtid!</h1>
+          <p>
+            Möt 2 till 10 studenter samtidigt i snabba 10-frågors dueller med officiellt
+            All-play-all ELO.
+          </p>
         </div>
       </section>
 
@@ -221,8 +227,8 @@ function unauthenticatedView(ctx) {
           <div class="auth-prompt-icon">${icon('Swords')}</div>
           <h2>Logga in för att tävla</h2>
           <p>
-            1v1-läget och ELO-systemet kräver ett Google-konto för att spara din ranking och
-            registrera vinster på topplistan.
+            Arenan och ELO-systemet kräver ett Google-konto för att spara din ranking och registrera
+            segrar på topplistan.
           </p>
           <button class="primary auth-login-btn" @click=${ctx.account}>
             ${icon('LogIn')} Logga in med Google
@@ -253,9 +259,12 @@ function lobbyBrowserView(ctx) {
     <div class="multiplayer-container">
       <section class="page-heading">
         <div>
-          <p class="overline">DUEL ARENA · 1V1</p>
-          <h1 tabindex="-1">1v1 Duell</h1>
-          <p>Snabbaste korrekta svar ger +1 poäng. Fel svar ger -1 poäng. 10 frågor per match.</p>
+          <p class="overline">PARTY & ARENA · 2–10 SPELARE</p>
+          <h1 tabindex="-1">Flerspelararena</h1>
+          <p>
+            Svara snabbt och rätt för upp till 1 000 poäng! Fel svar ger −250 poäng. 10 frågor per
+            match.
+          </p>
         </div>
         <div class="user-elo-badge">
           <span class="user-elo-label">Ditt ELO:</span>
@@ -299,7 +308,7 @@ function lobbyBrowserView(ctx) {
                 <div class="mp-actions-panel">
                   <div class="card create-lobby-card">
                     <h3>Skapa en ny lobby</h3>
-                    <p class="card-desc">Välj gren och starta ett väntrum för utmanare:</p>
+                    <p class="card-desc">Välj gren och bjud in upp till 10 spelare:</p>
 
                     <div class="branch-selector" role="radiogroup" aria-label="Välj gren">
                       <button
@@ -312,7 +321,7 @@ function lobbyBrowserView(ctx) {
                           ctx.render();
                         }}
                       >
-                        <span class="branch-title">🎯 Partikel 1v1</span>
+                        <span class="branch-title">🎯 Partikelarena</span>
                         <small>Snabba luckor med vanliga partiklar</small>
                       </button>
                       <button
@@ -325,7 +334,7 @@ function lobbyBrowserView(ctx) {
                           ctx.render();
                         }}
                       >
-                        <span class="branch-title">📖 Vokabulär 1v1</span>
+                        <span class="branch-title">📖 Vokabulärarena</span>
                         <small>Ord & kanji från Genki Lektion 3–5</small>
                       </button>
                       <button
@@ -338,7 +347,7 @@ function lobbyBrowserView(ctx) {
                           ctx.render();
                         }}
                       >
-                        <span class="branch-title">🧩 Ordföljd & Meningar 1v1</span>
+                        <span class="branch-title">🧩 Ordföljd & Meningar</span>
                         <small>Satsdelar (S/O/V) och meningsbyggnad</small>
                       </button>
                     </div>
@@ -412,7 +421,7 @@ function lobbyBrowserView(ctx) {
                         ? html`
                             <div class="empty-lobbies">
                               <p>Inga öppna matcher just nu.</p>
-                              <small>Skapa en lobby och dela koden med en kursare!</small>
+                              <small>Skapa en lobby och dela koden med kursare!</small>
                             </div>
                           `
                         : html`
@@ -425,6 +434,7 @@ function lobbyBrowserView(ctx) {
                                     : lobby.category === 'vocab'
                                       ? 'Vokabulär'
                                       : 'Ordföljd';
+                                const count = lobby.playerCount || (lobby.guest ? 2 : 1);
                                 return html`
                                   <li class="lobby-item">
                                     <div class="lobby-info">
@@ -444,15 +454,18 @@ function lobbyBrowserView(ctx) {
                                             >${lobby.host.elo || DEFAULT_ELO} ELO</span
                                           >
                                           <span class="badge cat-badge">${branchName}</span>
+                                          <span class="badge count-badge"
+                                            >${count}/${MAX_PLAYERS}</span
+                                          >
                                         </div>
                                       </div>
                                     </div>
                                     <button
                                       class="secondary join-btn"
-                                      ?disabled=${isMe}
+                                      ?disabled=${isMe || count >= MAX_PLAYERS}
                                       @click=${() => joinSelectedLobby(ctx, lobby.id)}
                                     >
-                                      ${isMe ? 'Din lobby' : 'Utmana'}
+                                      ${isMe ? 'Din lobby' : count >= MAX_PLAYERS ? 'Full' : 'Gå med'}
                                     </button>
                                   </li>
                                 `;
@@ -467,7 +480,7 @@ function lobbyBrowserView(ctx) {
           : html`
               <div class="card leaderboard-card">
                 <div class="card-header-row">
-                  <h2>${icon('Trophy')} Topplista · 1v1 Elo</h2>
+                  <h2>${icon('Trophy')} Topplista · Officiellt ELO</h2>
                   <small>Uppdateras i realtid efter varje match</small>
                 </div>
                 ${renderLeaderboardTable(leaderboardList, user.uid)}
@@ -517,80 +530,85 @@ async function joinSelectedLobby(ctx, lobbyId) {
 }
 
 /* =========================================================================
-   3. Waiting Room View
+   3. Waiting Room View (Supports 2–10 Players)
    ========================================================================= */
 function waitingRoomView(ctx) {
   const { user } = ctx;
-  const isHost = currentLobbyData.host.uid === user.uid;
-  const guest = currentLobbyData.guest;
+  const isHost = currentLobbyData.host?.uid === user.uid;
+
+  const playersMap = currentLobbyData.players || {
+    [currentLobbyData.host.uid]: currentLobbyData.host,
+    ...(currentLobbyData.guest ? { [currentLobbyData.guest.uid]: currentLobbyData.guest } : {}),
+  };
+  const playersList = Object.values(playersMap);
+  const count = playersList.length;
+
   const categoryLabel =
     currentLobbyData.category === 'particles'
-      ? 'Partikel 1v1'
+      ? 'Partiklar'
       : currentLobbyData.category === 'vocab'
-        ? 'Vokabulär 1v1'
-        : 'Ordföljd & Meningar 1v1';
+        ? 'Vokabulär'
+        : 'Ordföljd & Meningar';
+
+  const canStart = count >= MIN_PLAYERS;
 
   return html`
     <div class="multiplayer-container">
       <div class="waiting-card card">
         <div class="waiting-header">
-          <span class="badge cat-badge">${categoryLabel}</span>
+          <span class="badge cat-badge">${categoryLabel} Arena</span>
           <h2>Rumskod: <span class="room-code-tag">${currentLobbyData.id}</span></h2>
-          <p class="waiting-sub">Dela koden med den du vill möta eller vänta på en utmanare.</p>
-        </div>
-
-        <div class="players-vs-grid">
-          <div class="player-slot player-host">
-            <div class="player-avatar-large">
-              ${
-                currentLobbyData.host.photoURL
-                  ? html`<img src=${currentLobbyData.host.photoURL} alt="" />`
-                  : html`<span class="avatar-placeholder-large"
-                      >${currentLobbyData.host.displayName[0]}</span
-                    >`
-              }
-            </div>
-            <strong class="player-slot-name">${currentLobbyData.host.displayName}</strong>
-            <span class="badge elo-badge">${currentLobbyData.host.elo || DEFAULT_ELO} ELO</span>
-            <span class="slot-role">Värd</span>
-          </div>
-
-          <div class="vs-divider">
-            <span>VS</span>
-          </div>
-
-          <div class="player-slot player-guest">
+          <p class="waiting-sub">Dela koden med kursare för att starta matchen tillsammans!</p>
+          <div class="waiting-counter-badge">
+            ${icon('Users')} <strong>${count} / ${MAX_PLAYERS}</strong> anslutna
             ${
-              guest
-                ? html`
-                    <div class="player-avatar-large">
-                      ${
-                        guest.photoURL
-                          ? html`<img src=${guest.photoURL} alt="" />`
-                          : html`<span class="avatar-placeholder-large"
-                              >${guest.displayName[0]}</span
-                            >`
-                      }
-                    </div>
-                    <strong class="player-slot-name">${guest.displayName}</strong>
-                    <span class="badge elo-badge">${guest.elo || DEFAULT_ELO} ELO</span>
-                    <span class="slot-role slot-ready">Redo</span>
-                  `
-                : html`
-                    <div class="player-avatar-large waiting-pulse">${icon('Users')}</div>
-                    <span class="waiting-text">Väntar på utmanare...</span>
-                  `
+              canStart
+                ? html`<span class="badge ready-tag">Redo att starta</span>`
+                : html`<span class="badge waiting-tag">Väntar på fler spelare...</span>`
             }
           </div>
         </div>
 
+        <!-- Dynamic 10-Player Grid -->
+        <div class="waiting-players-grid">
+          ${playersList.map((player) => {
+            const playerIsHost = player.uid === currentLobbyData.host?.uid;
+            return html`
+              <div class="waiting-player-card ${player.uid === user.uid ? 'card-me' : ''}">
+                <div class="waiting-avatar-wrap">
+                  ${
+                    player.photoURL
+                      ? html`<img class="waiting-avatar" src=${player.photoURL} alt="" />`
+                      : html`<span class="waiting-avatar-placeholder"
+                          >${player.displayName?.[0] || '?'}</span
+                        >`
+                  }
+                  ${playerIsHost ? html`<span class="crown-badge" title="Värd">👑</span>` : ''}
+                </div>
+                <strong class="waiting-name">${player.displayName}</strong>
+                <span class="badge elo-badge">${player.elo || DEFAULT_ELO} ELO</span>
+                <span class="waiting-role">${playerIsHost ? 'Värd' : 'Redo'}</span>
+              </div>
+            `;
+          })}
+          ${Array.from({ length: Math.max(0, MAX_PLAYERS - count) }).map(
+            () => html`
+              <div class="waiting-slot-empty">
+                <div class="empty-plus-icon">${icon('UserPlus')}</div>
+                <span class="empty-slot-label">Plats ledig</span>
+              </div>
+            `,
+          )}
+        </div>
+
         <div class="waiting-actions">
-          ${feedbackMessage ? html`<p role="alert">${feedbackMessage}</p>` : ''}
+          ${feedbackMessage ? html`<p class="feedback-msg" role="alert">${feedbackMessage}</p>` : ''}
           ${
-            isHost && guest
+            isHost
               ? html`
                   <button
                     class="primary start-btn"
+                    ?disabled=${!canStart}
                     @click=${async () => {
                       try {
                         await startMatch(activeLobbyId);
@@ -602,8 +620,19 @@ function waitingRoomView(ctx) {
                   >
                     ${icon('Swords')} Starta matchen!
                   </button>
+                  ${
+                    !canStart
+                      ? html`<small class="waiting-hint"
+                          >Väntar på att minst en till spelare ansluter...</small
+                        >`
+                      : ''
+                  }
                 `
-              : ''
+              : html`
+                  <div class="guest-waiting-status">
+                    <p>${icon('Clock')} Väntar på att värden ska starta matchen...</p>
+                  </div>
+                `
           }
 
           <button
@@ -623,7 +652,7 @@ function waitingRoomView(ctx) {
 }
 
 /* =========================================================================
-   4. Live Match Arena View
+   4. Live Match Arena View (Kahoot-Style)
    ========================================================================= */
 function arenaView(ctx) {
   const { user } = ctx;
@@ -635,22 +664,37 @@ function arenaView(ctx) {
   const countdownSec = Math.max(1, Math.ceil((game.roundStartTime - now) / 1000));
 
   const roundIdx = game.currentRoundIndex || 0;
-  const currentQ = game.questions[roundIdx];
-  const hostUid = game.hostUid;
-  const guestUid = game.guestUid;
-  const isHost = user.uid === hostUid;
+  const currentQ = game.questions?.[roundIdx] || { prompt: '', choices: [] };
 
-  const myScore = game.scores[user.uid] || 0;
-  const oppUid = isHost ? guestUid : hostUid;
-  const oppScore = game.scores[oppUid] || 0;
-  const oppName = isHost
-    ? currentLobbyData.guest?.displayName || 'Motståndare'
-    : currentLobbyData.host?.displayName || 'Värd';
+  const playersMap = currentLobbyData.players || {
+    [currentLobbyData.host.uid]: currentLobbyData.host,
+    ...(currentLobbyData.guest ? { [currentLobbyData.guest.uid]: currentLobbyData.guest } : {}),
+  };
+  const allPlayers = Object.values(playersMap);
+  const totalPlayers = allPlayers.length;
 
   const roundAnswers = game.answers?.[roundIdx] || {};
+  const answeredCount = Object.keys(roundAnswers).length;
   const myAnswer = roundAnswers[user.uid];
   const hasAnswered = Boolean(myAnswer);
-  const roundWinnerUid = game.roundWinners?.[roundIdx];
+  const roundWinners = game.roundWinners || {};
+  const roundWinnerUid = roundWinners[roundIdx];
+
+  // Scores and sorted leaderboard
+  const scores = game.scores || {};
+  const sortedStandings = [...allPlayers]
+    .map((p) => ({
+      uid: p.uid,
+      displayName: p.displayName || 'Spelare',
+      photoURL: p.photoURL,
+      score: scores[p.uid] || 0,
+      roundPoints: roundAnswers[p.uid]?.pointsAwarded || 0,
+    }))
+    .sort((a, b) => b.score - a.score);
+
+  const myRank = sortedStandings.findIndex((p) => p.uid === user.uid) + 1 || 1;
+  const myScore = scores[user.uid] || 0;
+  const leader = sortedStandings[0] || { displayName: 'Ingen', score: 0 };
 
   // Timer bar calculation
   const elapsed = Math.max(0, now - (game.roundStartTime || now));
@@ -658,16 +702,24 @@ function arenaView(ctx) {
 
   return html`
     <div class="multiplayer-container arena-container">
-      ${feedbackMessage ? html`<p role="alert">${feedbackMessage}</p>` : ''}
+      ${feedbackMessage ? html`<p class="feedback-msg" role="alert">${feedbackMessage}</p>` : ''}
+
       <!-- Arena Top Scoreboard -->
       <header class="arena-header card">
         <div class="arena-player arena-me">
-          <span class="arena-player-label">Du</span>
-          <div class="arena-score ${myAnswer?.isCorrect ? 'score-gain' : ''}">${myScore}</div>
+          <span class="arena-player-label">#${myRank} Du</span>
+          <div class="arena-score ${myAnswer?.isCorrect ? 'score-gain' : ''}">
+            ${myScore.toLocaleString('sv-SE')}p
+          </div>
         </div>
 
         <div class="arena-round-indicator">
-          <span class="round-badge">Fråga ${roundIdx + 1} / 10</span>
+          <div class="round-status-row">
+            <span class="round-badge">Fråga ${roundIdx + 1} / 10</span>
+            <span class="answered-badge ${answeredCount === totalPlayers ? 'all-answered' : ''}">
+              ${icon('Users')} ${answeredCount}/${totalPlayers} har svarat
+            </span>
+          </div>
           <div class="timer-track" aria-hidden="true">
             <div
               class="timer-fill"
@@ -676,9 +728,11 @@ function arenaView(ctx) {
           </div>
         </div>
 
-        <div class="arena-player arena-opp">
-          <span class="arena-player-label">${oppName}</span>
-          <div class="arena-score">${oppScore}</div>
+        <div class="arena-player arena-leader">
+          <span class="arena-player-label"
+            >#1 ${leader.uid === user.uid ? 'Du leder!' : leader.displayName}</span
+          >
+          <div class="arena-score">${leader.score.toLocaleString('sv-SE')}p</div>
         </div>
       </header>
 
@@ -688,7 +742,7 @@ function arenaView(ctx) {
               <div class="arena-countdown-overlay card">
                 <span class="countdown-label">Gör dig redo!</span>
                 <div class="countdown-number">${countdownSec}</div>
-                <p>Snabbaste korrekta svaret vinner poängen!</p>
+                <p>Snabbaste korrekta svaren ger upp till 1 000 poäng. Fel svar ger −250p!</p>
               </div>
             `
           : html`
@@ -734,28 +788,76 @@ function arenaView(ctx) {
                       }}
                     >
                       <span class="choice-text">${languageText(choice)}</span>
-                      ${wasChosen && myAnswer.isCorrect ? html`<span class="choice-badge">+1p!</span>` : ''}
-                      ${wasChosen && !myAnswer.isCorrect ? html`<span class="choice-badge badge-wrong">-1p!</span>` : ''}
+                      ${
+                        wasChosen && myAnswer.isCorrect
+                          ? html`<span class="choice-badge">+${myAnswer.pointsAwarded}p!</span>`
+                          : ''
+                      }
+                      ${
+                        wasChosen && !myAnswer.isCorrect
+                          ? html`<span class="choice-badge badge-wrong"
+                              >${myAnswer.pointsAwarded}p!</span
+                            >`
+                          : ''
+                      }
                     </button>
                   `;
                 })}
               </div>
 
-              <!-- Round Result Banner during 1.5s pause -->
+              <!-- Round Result Banner during 2.0s Facitpaus -->
               ${
                 game.status === 'round_end'
                   ? html`
                       <div class="round-end-banner">
+                        <div class="round-feedback-header">
+                          ${
+                            myAnswer?.isCorrect
+                              ? roundWinnerUid === user.uid
+                                ? html`<strong class="winner-self"
+                                    >${icon('Check')} Du var snabbast!
+                                    (+${myAnswer.pointsAwarded}p)</strong
+                                  >`
+                                : html`<strong class="winner-self"
+                                    >${icon('Check')} Rätt svar!
+                                    (+${myAnswer.pointsAwarded}p)</strong
+                                  >`
+                              : myAnswer
+                                ? html`<strong class="winner-opp"
+                                    >${icon('X')} Fel svar! (${myAnswer.pointsAwarded}p)</strong
+                                  >`
+                                : html`<strong>${icon('Clock')} Tiden ute! (0p)</strong>`
+                          }
+                        </div>
                         ${
-                          roundWinnerUid === user.uid
-                            ? html`<strong class="winner-self"
-                                >${icon('Check')} Du var snabbast! (+1p)</strong
-                              >`
-                            : roundWinnerUid === oppUid
-                              ? html`<strong class="winner-opp">${oppName} tog poängen!</strong>`
-                              : html`<strong>Ingen svarade rätt!</strong>`
+                          currentQ.explanation
+                            ? html`<p class="round-expl">${currentQ.explanation}</p>`
+                            : ''
                         }
-                        ${currentQ.explanation ? html`<p class="round-expl">${currentQ.explanation}</p>` : ''}
+
+                        <!-- Mini Kahoot-Style Leaderboard during pause -->
+                        <div class="mini-leaderboard">
+                          <span class="mini-lb-title">Ställning efter fråga ${roundIdx + 1}</span>
+                          <div class="mini-lb-list">
+                            ${sortedStandings.slice(0, 5).map((p, idx) => {
+                              const isMe = p.uid === user.uid;
+                              return html`
+                                <div class="mini-lb-row ${isMe ? 'row-me' : ''}">
+                                  <span class="mini-lb-rank">#${idx + 1}</span>
+                                  <span class="mini-lb-name">${p.displayName}</span>
+                                  ${
+                                    p.roundPoints > 0
+                                      ? html`<span class="mini-lb-gain">+${p.roundPoints}p</span>`
+                                      : ''
+                                  }
+                                  <span class="mini-lb-score"
+                                    >${p.score.toLocaleString('sv-SE')}p</span
+                                  >
+                                </div>
+                              `;
+                            })}
+                          </div>
+                        </div>
                       </div>
                     `
                   : ''
@@ -767,30 +869,46 @@ function arenaView(ctx) {
 }
 
 /* =========================================================================
-   5. Match Result View
+   5. Match Result View (Podium & All-Play-All Table)
    ========================================================================= */
 function matchResultView(ctx) {
   const { user } = ctx;
   const game = currentLobbyData.game;
   if (!game) return html`<div>Resultat saknas</div>`;
 
-  const hostUid = game.hostUid;
-  const isHost = user.uid === hostUid;
-  const oppUid = isHost ? game.guestUid : hostUid;
-  const oppName = isHost
-    ? currentLobbyData.guest?.displayName || 'Motståndare'
-    : currentLobbyData.host?.displayName || 'Värd';
+  const playersMap = currentLobbyData.players || {
+    [currentLobbyData.host.uid]: currentLobbyData.host,
+    ...(currentLobbyData.guest ? { [currentLobbyData.guest.uid]: currentLobbyData.guest } : {}),
+  };
+  const allPlayers = Object.values(playersMap);
 
-  const myScore = game.scores[user.uid] || 0;
-  const oppScore = game.scores[oppUid] || 0;
+  const scores = game.scores || {};
+  const sortedFinal = [...allPlayers]
+    .map((p) => ({
+      uid: p.uid,
+      displayName: p.displayName || 'Spelare',
+      photoURL: p.photoURL,
+      elo: p.elo || DEFAULT_ELO,
+      score: scores[p.uid] || 0,
+      eloDiff: game.eloChanges?.[p.uid] || 0,
+    }))
+    .sort((a, b) => b.score - a.score);
+
+  const myRank = sortedFinal.findIndex((p) => p.uid === user.uid) + 1 || 1;
   const isWinner = game.winnerUid === user.uid;
   const isDraw = game.isDraw;
   const myEloDiff = game.eloChanges?.[user.uid] || 0;
+  const myFinalScore = scores[user.uid] || 0;
 
   if (isWinner && !hasCelebrated) {
     hasCelebrated = true;
     playAnimeSound('arigato', ctx.theme);
   }
+
+  // Top 3 for podium
+  const first = sortedFinal[0];
+  const second = sortedFinal[1];
+  const third = sortedFinal[2];
 
   return html`
     <div class="multiplayer-container">
@@ -801,7 +919,15 @@ function matchResultView(ctx) {
           <div class="result-icon">
             ${isWinner ? icon('Trophy') : isDraw ? icon('Users') : icon('Swords')}
           </div>
-          <h1>${isWinner ? 'Seger! 🏆' : isDraw ? 'Oavgjort! 🤝' : 'Förlust!'}</h1>
+          <h1>
+            ${
+              isWinner
+                ? 'Seger! 🏆'
+                : isDraw
+                  ? 'Oavgjort! 🤝'
+                  : `Förlust! (Plats #${myRank} av ${allPlayers.length})`
+            }
+          </h1>
           <p class="result-tagline">
             ${
               isWinner
@@ -813,25 +939,114 @@ function matchResultView(ctx) {
           </p>
         </div>
 
-        <div class="result-scores-box">
-          <div class="result-player">
-            <span>Du</span>
-            <strong>${myScore}p</strong>
-          </div>
-          <span class="score-dash">–</span>
-          <div class="result-player">
-            <span>${oppName}</span>
-            <strong>${oppScore}p</strong>
+        <!-- 3-Player Visual Podium -->
+        <div class="podium-section">
+          <div class="podium-container">
+            ${
+              second
+                ? html`
+                    <div class="podium-step podium-silver">
+                      <div class="podium-player">
+                        <span class="podium-medal">🥈</span>
+                        <strong class="podium-name">${second.displayName}</strong>
+                        <span class="podium-score">${second.score.toLocaleString('sv-SE')}p</span>
+                      </div>
+                      <div class="podium-bar bar-silver">#2</div>
+                    </div>
+                  `
+                : ''
+            }
+            ${
+              first
+                ? html`
+                    <div class="podium-step podium-gold">
+                      <div class="podium-player">
+                        <span class="podium-medal">🥇</span>
+                        <strong class="podium-name">${first.displayName}</strong>
+                        <span class="podium-score">${first.score.toLocaleString('sv-SE')}p</span>
+                      </div>
+                      <div class="podium-bar bar-gold">#1</div>
+                    </div>
+                  `
+                : ''
+            }
+            ${
+              third
+                ? html`
+                    <div class="podium-step podium-bronze">
+                      <div class="podium-player">
+                        <span class="podium-medal">🥉</span>
+                        <strong class="podium-name">${third.displayName}</strong>
+                        <span class="podium-score">${third.score.toLocaleString('sv-SE')}p</span>
+                      </div>
+                      <div class="podium-bar bar-bronze">#3</div>
+                    </div>
+                  `
+                : ''
+            }
           </div>
         </div>
 
+        <!-- My ELO change -->
         <div class="elo-change-box">
-          <span class="elo-change-label">ELO-justering:</span>
+          <span class="elo-change-label">Din ELO-justering:</span>
           <strong
             class="elo-change-val ${myEloDiff > 0 ? 'elo-pos' : myEloDiff < 0 ? 'elo-neg' : ''}"
           >
             ${myEloDiff > 0 ? `+${myEloDiff}` : myEloDiff} ELO
           </strong>
+        </div>
+
+        <!-- Full Results Table for all participants (2–10) -->
+        <div class="match-summary-table-section">
+          <h3>${icon('Trophy')} Slutställning (${allPlayers.length} spelare)</h3>
+          <div class="leaderboard-table-wrapper">
+            <table class="leaderboard-table results-table">
+              <thead>
+                <tr>
+                  <th class="col-rank">#</th>
+                  <th class="col-player">Spelare</th>
+                  <th class="col-score">Matchpoäng</th>
+                  <th class="col-elo">ELO-ändring</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${sortedFinal.map((p, idx) => {
+                  const isMe = p.uid === user.uid;
+                  const rankIcon =
+                    idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `${idx + 1}`;
+                  return html`
+                    <tr class="${isMe ? 'row-me' : ''}">
+                      <td class="col-rank">${rankIcon}</td>
+                      <td class="col-player">
+                        <div class="player-cell">
+                          ${
+                            p.photoURL
+                              ? html`<img class="cell-avatar" src=${p.photoURL} alt="" />`
+                              : html`<span class="cell-avatar placeholder"
+                                  >${p.displayName?.[0] || '?'}</span
+                                >`
+                          }
+                          <strong>${p.displayName}</strong>
+                          ${isMe ? html`<span class="tag-you">Du</span>` : ''}
+                        </div>
+                      </td>
+                      <td class="col-score">
+                        <strong>${p.score.toLocaleString('sv-SE')}p</strong>
+                      </td>
+                      <td class="col-elo">
+                        <span
+                          class="elo-diff-tag ${p.eloDiff > 0 ? 'elo-pos' : p.eloDiff < 0 ? 'elo-neg' : ''}"
+                        >
+                          ${p.eloDiff > 0 ? `+${p.eloDiff}` : p.eloDiff} ELO
+                        </span>
+                      </td>
+                    </tr>
+                  `;
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
 
         <div class="result-actions">
