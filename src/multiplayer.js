@@ -1,9 +1,7 @@
 import {
   doc,
   collection,
-  getDoc,
   setDoc,
-  deleteDoc,
   onSnapshot,
   query,
   where,
@@ -470,18 +468,39 @@ export function finalizeMatch(game, now = Date.now()) {
    ========================================================================= */
 
 /**
- * Creates a new lobby document in Firestore with heartbeat.
+ * Register the player's baseline before a match can update both profiles.
  */
+async function ensureLeaderboardProfile(user) {
+  const ref = doc(db, 'leaderboard', user.uid);
+  return runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref);
+    const profile = {
+      ...(snap.exists()
+        ? snap.data()
+        : {
+            uid: user.uid,
+            elo: DEFAULT_ELO,
+            wins: 0,
+            losses: 0,
+            draws: 0,
+            matchesPlayed: 0,
+            lastMatchId: '',
+          }),
+      displayName: user.displayName || 'Spelare',
+      photoURL: user.photoURL || null,
+    };
+    tx.set(ref, profile);
+    return profile;
+  });
+}
+
 export async function createLobby(user, category) {
   if (!user || !user.uid) throw new Error('Inloggning krävs');
   const code = generateLobbyCode();
   const lobbyRef = doc(db, 'lobbies', code);
 
-  let hostElo = DEFAULT_ELO;
-  try {
-    const pSnap = await getDoc(doc(db, 'leaderboard', user.uid));
-    if (pSnap.exists()) hostElo = pSnap.data().elo || DEFAULT_ELO;
-  } catch {}
+  const profile = await ensureLeaderboardProfile(user);
+  const hostElo = profile.elo;
 
   const now = Date.now();
   const lobbyData = {
@@ -508,13 +527,13 @@ export async function createLobby(user, category) {
 /**
  * Sends a heartbeat for a lobby to keep it active in the open lobby list.
  */
-export async function sendHeartbeat(lobbyId) {
-  if (!lobbyId) return;
+export async function sendHeartbeat(lobbyId, uid) {
+  if (!lobbyId || !uid) return;
   try {
     const lobbyRef = doc(db, 'lobbies', lobbyId);
     await runTransaction(db, async (tx) => {
       const snap = await tx.get(lobbyRef);
-      if (snap.exists() && snap.data().status === 'waiting') {
+      if (snap.exists() && snap.data().status === 'waiting' && snap.data().host.uid === uid) {
         tx.update(lobbyRef, { heartbeat: Date.now(), updatedAt: Date.now() });
       }
     });
@@ -529,17 +548,16 @@ export async function joinLobby(lobbyId, user) {
   const cleanId = lobbyId.toUpperCase().trim();
   const lobbyRef = doc(db, 'lobbies', cleanId);
 
-  let guestElo = DEFAULT_ELO;
-  try {
-    const pSnap = await getDoc(doc(db, 'leaderboard', user.uid));
-    if (pSnap.exists()) guestElo = pSnap.data().elo || DEFAULT_ELO;
-  } catch {}
+  const profile = await ensureLeaderboardProfile(user);
+  const guestElo = profile.elo;
 
   return runTransaction(db, async (tx) => {
     const snap = await tx.get(lobbyRef);
     if (!snap.exists()) throw new Error('Lobbyn hittades inte');
     const data = snap.data();
     if (data.status !== 'waiting') throw new Error('Matchen har redan startat');
+    if (Date.now() - (data.heartbeat || data.createdAt || 0) >= HEARTBEAT_TTL_MS)
+      throw new Error('Lobbyn är inte längre aktiv');
     if (data.host.uid === user.uid) return data;
     if (data.guest && data.guest.uid !== user.uid) throw new Error('Lobbyn är redan full');
 
@@ -566,8 +584,10 @@ export async function leaveLobby(lobbyId, uid) {
       if (!snap.exists()) return;
       const data = snap.data();
 
+      if (data.host.uid !== uid && data.guest?.uid !== uid) return;
+
       // If in progress or finished, forfeiting or exiting
-      if (data.status === 'playing' || data.status === 'round_end') {
+      if (data.game && data.game.status !== 'finished' && data.status !== 'waiting') {
         // Player forfeits match
         await applyForfeitInTransaction(tx, lobbyRef, data, uid, Date.now());
         return;
@@ -598,6 +618,7 @@ export async function startMatch(lobbyId) {
     const snap = await tx.get(lobbyRef);
     if (!snap.exists()) throw new Error('Lobbyn finns inte');
     const data = snap.data();
+    if (data.status !== 'waiting') return data.game;
     if (!data.guest) throw new Error('Väntar på att en motståndare ansluter');
 
     const questionsList = generateQuestionsForCategory(data.category, QUESTIONS_PER_MATCH);
@@ -655,15 +676,14 @@ export async function submitAnswer(lobbyId, uid, roundIndex, selectedAnswer) {
     const updatedGame = evaluateRound(game, uid, selectedAnswer, now);
     const isFinished = updatedGame.status === 'finished';
 
-    tx.update(lobbyRef, {
-      game: updatedGame,
-      status: isFinished ? 'finished' : updatedGame.status,
-      updatedAt: now,
-    });
-
-    // If match finished, atomically update both players' leaderboard stats!
     if (isFinished) {
-      await updateBothLeaderboardsInTransaction(tx, lobbyId, updatedGame, now);
+      await finishMatchInTransaction(tx, lobbyRef, lobbyId, updatedGame, now);
+    } else {
+      tx.update(lobbyRef, {
+        game: updatedGame,
+        status: updatedGame.status,
+        updatedAt: now,
+      });
     }
 
     return updatedGame;
@@ -701,12 +721,7 @@ export async function advanceRoundIfDue(lobbyId) {
       };
       if (roundIdx >= data.game.questions.length - 1) {
         const finalGame = finalizeMatch(updated, now);
-        tx.update(lobbyRef, {
-          game: finalGame,
-          status: 'finished',
-          updatedAt: now,
-        });
-        await updateBothLeaderboardsInTransaction(tx, lobbyId, finalGame, now);
+        await finishMatchInTransaction(tx, lobbyRef, lobbyId, finalGame, now);
       } else {
         updated.status = 'round_end';
         updated.roundEndAt = now;
@@ -753,27 +768,24 @@ async function applyForfeitInTransaction(tx, lobbyRef, lobbyData, forfeitingUid,
     },
   };
 
-  tx.update(lobbyRef, {
-    status: 'finished',
-    game: finishedGame,
-    updatedAt: now,
-  });
-
-  await updateBothLeaderboardsInTransaction(tx, lobbyData.id, finishedGame, now);
+  await finishMatchInTransaction(tx, lobbyRef, lobbyData.id, finishedGame, now);
 }
 
 /**
  * Atomically updates both players' leaderboard records in the transaction.
  */
-async function updateBothLeaderboardsInTransaction(tx, matchId, game, now) {
+async function finishMatchInTransaction(tx, lobbyRef, matchId, game, now) {
   const hostUid = game.hostUid;
   const guestUid = game.guestUid;
   const winnerUid = game.winnerUid;
   const isDraw = game.isDraw;
 
-  for (const uid of [hostUid, guestUid]) {
-    const leadRef = doc(db, 'leaderboard', uid);
-    const snap = await tx.get(leadRef);
+  // Firestore requires every read (including both profiles) before any write.
+  const refs = [hostUid, guestUid].map((uid) => doc(db, 'leaderboard', uid));
+  const snapshots = await Promise.all(refs.map((ref) => tx.get(ref)));
+  for (const [index, uid] of [hostUid, guestUid].entries()) {
+    const leadRef = refs[index];
+    const snap = snapshots[index];
     const existing = snap.exists()
       ? snap.data()
       : {
@@ -806,41 +818,59 @@ async function updateBothLeaderboardsInTransaction(tx, matchId, game, now) {
 
     tx.set(leadRef, updated);
   }
+  tx.update(lobbyRef, { status: 'finished', game, updatedAt: now });
 }
 
 /**
  * Subscribes to live updates for a single lobby.
  */
-export function subscribeToLobby(lobbyId, callback) {
+export function subscribeToLobby(lobbyId, callback, onError) {
   const lobbyRef = doc(db, 'lobbies', lobbyId);
-  return onSnapshot(lobbyRef, (snap) => {
-    if (snap.exists()) {
-      callback(snap.data());
-    } else {
-      callback(null);
-    }
-  });
+  return onSnapshot(
+    lobbyRef,
+    (snap) => {
+      if (snap.exists()) {
+        callback(snap.data());
+      } else {
+        callback(null);
+      }
+    },
+    onError,
+  );
 }
 
 /**
  * Subscribes to waiting lobbies in real time, filtering out abandoned/stale lobbies.
  */
-export function subscribeToOpenLobbies(callback) {
-  const q = query(collection(db, 'lobbies'), where('status', '==', 'waiting'), limit(20));
-  return onSnapshot(q, (snapshot) => {
+export function subscribeToOpenLobbies(callback, onError) {
+  // Limit the visible list after filtering, so abandoned rooms cannot hide live ones.
+  const q = query(collection(db, 'lobbies'), where('status', '==', 'waiting'));
+  let waiting = [];
+  const publish = () => {
     const now = Date.now();
-    const lobbies = [];
-    snapshot.forEach((d) => {
-      const data = d.data();
-      // Filter out abandoned lobbies whose heartbeat is older than TTL
-      const isHeartbeatFresh = !data.heartbeat || now - data.heartbeat < HEARTBEAT_TTL_MS;
-      if (isHeartbeatFresh) {
-        lobbies.push(data);
-      }
-    });
-    lobbies.sort((a, b) => b.createdAt - a.createdAt);
-    callback(lobbies);
-  });
+    callback(
+      waiting
+        .filter(
+          (data) => !data.guest && now - (data.heartbeat || data.createdAt || 0) < HEARTBEAT_TTL_MS,
+        )
+        .sort((a, b) => b.createdAt - a.createdAt)
+        .slice(0, 20),
+    );
+  };
+  const unsubscribe = onSnapshot(
+    q,
+    (snapshot) => {
+      waiting = snapshot.docs.map((snapshot) => snapshot.data());
+      publish();
+    },
+    onError,
+  );
+  // Expire rooms even when no further database updates arrive.
+  const expiryTimer = setInterval(publish, 1000);
+  return () => {
+    unsubscribe();
+    clearInterval(expiryTimer);
+  };
 }
 
 /**

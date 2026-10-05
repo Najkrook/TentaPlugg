@@ -334,7 +334,9 @@ function render(focus = false) {
           </div>
         </header>
         <main id="main">${keyed(session?.attemptId || view, body)}</main>
-        <footer><span id="cloud-status">${status}</span><span>GEMA70 · JAPC11</span></footer>
+        <footer>
+          <span id="cloud-status" .textContent=${status}></span><span>GEMA70 · JAPC11</span>
+        </footer>
       </div>
       <nav class="mobile-nav">
         ${navs.map(([id, i, l]) => html`<button class=${view === id ? 'active' : ''} @click=${() => navigate(id)}>${icon(i)}<span>${id === 'progress' ? 'Framsteg' : id === 'exams' ? 'Tentor' : id === 'multiplayer' ? '1v1' : l}</span></button>`)}
@@ -720,6 +722,7 @@ async function account() {
   render();
   try {
     if (user) {
+      await resetMultiplayerView(user.uid);
       await sync?.flush();
       await logout();
     } else await login(flush);
@@ -767,6 +770,7 @@ setupLocal(null);
 render();
 watchUser(async (nextUser) => {
   if ((user?.uid || null) === (nextUser?.uid || null)) return;
+  resetMultiplayerView();
   flush();
   saver.dispose();
   sync?.dispose();

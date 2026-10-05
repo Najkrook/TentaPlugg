@@ -39,7 +39,7 @@ service cloud.firestore {
 
     function isValidMatchLeaderboardUpdate(userId) {
       let matchId = request.resource.data.lastMatchId;
-      let matchData = get(/databases/$(database)/documents/lobbies/$(matchId)).data;
+      let matchData = getAfter(/databases/$(database)/documents/lobbies/$(matchId)).data;
       let isHost = matchData.host.uid == userId;
       let isGuest = matchData.guest.uid == userId;
       let oppUid = isHost ? matchData.guest.uid : matchData.host.uid;
@@ -48,7 +48,7 @@ service cloud.firestore {
       let isFinished = matchData.status == 'finished';
       let eloDiff = matchData.game.eloChanges[userId];
       let expectedElo = (resource.data.elo + eloDiff < 100) ? 100 : resource.data.elo + eloDiff;
-      let freshMatch = resource.data.lastMatchId != matchId;
+      let freshMatch = resource.data.get('lastMatchId', '') != matchId;
 
       return callerIsParticipant
         && (isHost || isGuest)

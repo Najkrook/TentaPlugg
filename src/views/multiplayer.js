@@ -14,6 +14,7 @@ import {
   subscribeToLeaderboard,
   DEFAULT_ELO,
   ROUND_TIME_MS,
+  HEARTBEAT_TTL_MS,
 } from '../multiplayer.js';
 
 let activeLobbyId = null;
@@ -28,14 +29,16 @@ let heartbeatInterval = null;
 let selectedCategory = 'particles';
 let joinCodeInput = '';
 let activeTab = 'lobbies'; // 'lobbies' | 'leaderboard'
-let localAnswer = null;
 let hasCelebrated = false;
 let feedbackMessage = '';
+let activeUserUid = null;
+let unloadRegistered = false;
+let lobbyBusy = false;
+let viewEpoch = 0;
 
 export function resetMultiplayerView(uid = null) {
-  if (activeLobbyId && uid) {
-    leaveLobby(activeLobbyId, uid);
-  }
+  const leaving = activeLobbyId && uid ? leaveLobby(activeLobbyId, uid) : Promise.resolve();
+  viewEpoch++;
   if (lobbyUnsub) {
     lobbyUnsub();
     lobbyUnsub = null;
@@ -58,20 +61,49 @@ export function resetMultiplayerView(uid = null) {
   }
   activeLobbyId = null;
   currentLobbyData = null;
-  localAnswer = null;
+  activeUserUid = null;
+  lobbyBusy = false;
   hasCelebrated = false;
   feedbackMessage = '';
+  return leaving;
+}
+
+function watchLobby(ctx, code) {
+  lobbyUnsub?.();
+  lobbyUnsub = subscribeToLobby(
+    code,
+    (data) => {
+      if (!data) {
+        resetMultiplayerView();
+        feedbackMessage = 'Lobbyn har stängts.';
+      } else {
+        currentLobbyData = data;
+      }
+      ctx.render();
+    },
+    (error) => {
+      feedbackMessage = error.message || 'Kunde inte hämta matchen';
+      ctx.render();
+    },
+  );
 }
 
 export function multiplayerView(ctx) {
   const { user } = ctx;
+  activeUserUid = user?.uid || null;
 
   // Initialize listeners if not yet active
-  if (!openLobbiesUnsub) {
-    openLobbiesUnsub = subscribeToOpenLobbies((lobbies) => {
-      openLobbiesList = lobbies;
-      ctx.render?.();
-    });
+  if (user && !openLobbiesUnsub) {
+    openLobbiesUnsub = subscribeToOpenLobbies(
+      (lobbies) => {
+        openLobbiesList = lobbies;
+        ctx.render?.();
+      },
+      (error) => {
+        feedbackMessage = error.message || 'Kunde inte hämta lobbys';
+        ctx.render?.();
+      },
+    );
   }
   if (!leaderboardUnsub) {
     leaderboardUnsub = subscribeToLeaderboard((list) => {
@@ -82,22 +114,50 @@ export function multiplayerView(ctx) {
 
   // Timer loop for arena round checks & timeouts
   if (activeLobbyId && !timerInterval) {
-    timerInterval = setInterval(() => {
-      if (activeLobbyId && currentLobbyData?.game?.status === 'playing') {
-        advanceRoundIfDue(activeLobbyId);
+    let advancing = false;
+    timerInterval = setInterval(async () => {
+      const game = currentLobbyData?.game;
+      const now = Date.now();
+      if (
+        currentLobbyData?.status === 'waiting' &&
+        currentLobbyData.host.uid !== activeUserUid &&
+        now - (currentLobbyData.heartbeat || currentLobbyData.createdAt || 0) >= HEARTBEAT_TTL_MS
+      ) {
+        resetMultiplayerView(activeUserUid);
+        feedbackMessage = 'Värden är inte längre ansluten. Välj en annan lobby.';
         ctx.render?.();
-      } else if (activeLobbyId && currentLobbyData?.game?.status === 'round_end') {
-        advanceRoundIfDue(activeLobbyId);
-        ctx.render?.();
+        return;
       }
+      if (!game || game.status === 'finished') return;
+      const due =
+        (game.status === 'playing' && now > game.roundStartTime + ROUND_TIME_MS) ||
+        (game.status === 'round_end' && now >= game.nextRoundAt);
+      if (activeLobbyId && due && !advancing) {
+        advancing = true;
+        const epoch = viewEpoch;
+        try {
+          await advanceRoundIfDue(activeLobbyId);
+        } catch (error) {
+          if (epoch === viewEpoch)
+            feedbackMessage = error.message || 'Kunde inte uppdatera matchen';
+        } finally {
+          advancing = false;
+        }
+      }
+      ctx.render?.();
     }, 500);
   }
 
   // Heartbeat loop for keeping waiting lobby alive
-  if (activeLobbyId && currentLobbyData?.status === 'waiting' && !heartbeatInterval) {
+  if (
+    activeLobbyId &&
+    currentLobbyData?.status === 'waiting' &&
+    currentLobbyData.host.uid === activeUserUid &&
+    !heartbeatInterval
+  ) {
     heartbeatInterval = setInterval(() => {
       if (activeLobbyId && currentLobbyData?.status === 'waiting') {
-        sendHeartbeat(activeLobbyId);
+        sendHeartbeat(activeLobbyId, activeUserUid);
       }
     }, 10000);
   } else if ((!activeLobbyId || currentLobbyData?.status !== 'waiting') && heartbeatInterval) {
@@ -106,11 +166,11 @@ export function multiplayerView(ctx) {
   }
 
   // Register page unload cleanup
-  if (typeof window !== 'undefined' && !window._multiplayerUnloadRegistered) {
-    window._multiplayerUnloadRegistered = true;
+  if (typeof window !== 'undefined' && !unloadRegistered) {
+    unloadRegistered = true;
     window.addEventListener('beforeunload', () => {
-      if (activeLobbyId && user) {
-        leaveLobby(activeLobbyId, user.uid);
+      if (activeLobbyId && activeUserUid) {
+        leaveLobby(activeLobbyId, activeUserUid);
       }
     });
   }
@@ -285,22 +345,31 @@ function lobbyBrowserView(ctx) {
 
                     <button
                       class="primary create-btn"
+                      ?disabled=${lobbyBusy}
                       @click=${async () => {
+                        if (lobbyBusy) return;
+                        lobbyBusy = true;
+                        const epoch = viewEpoch;
                         feedbackMessage = 'Skapar lobby...';
                         ctx.render();
                         try {
                           const code = await createLobby(user, selectedCategory);
+                          if (epoch !== viewEpoch) {
+                            await leaveLobby(code, user.uid);
+                            return;
+                          }
                           activeLobbyId = code;
-                          localAnswer = null;
-                          hasRecordedResult = false;
+                          hasCelebrated = false;
                           feedbackMessage = '';
-                          lobbyUnsub = subscribeToLobby(code, (data) => {
-                            currentLobbyData = data;
-                            ctx.render();
-                          });
+                          watchLobby(ctx, code);
                         } catch (err) {
-                          feedbackMessage = err.message || 'Kunde inte skapa lobby';
-                          ctx.render();
+                          if (epoch === viewEpoch)
+                            feedbackMessage = err.message || 'Kunde inte skapa lobby';
+                        } finally {
+                          if (epoch === viewEpoch) {
+                            lobbyBusy = false;
+                            ctx.render();
+                          }
                         }
                       }}
                     >
@@ -421,22 +490,29 @@ async function handleJoinWithCode(ctx) {
 }
 
 async function joinSelectedLobby(ctx, lobbyId) {
+  if (lobbyBusy) return;
+  lobbyBusy = true;
+  const epoch = viewEpoch;
   feedbackMessage = 'Ansluter till match...';
   ctx.render();
   try {
     const joined = await joinLobby(lobbyId, ctx.user);
+    if (epoch !== viewEpoch) {
+      await leaveLobby(lobbyId, ctx.user.uid);
+      return;
+    }
     activeLobbyId = lobbyId;
     currentLobbyData = joined;
-    localAnswer = null;
-    hasRecordedResult = false;
+    hasCelebrated = false;
     feedbackMessage = '';
-    lobbyUnsub = subscribeToLobby(lobbyId, (data) => {
-      currentLobbyData = data;
-      ctx.render();
-    });
+    watchLobby(ctx, lobbyId);
   } catch (err) {
-    feedbackMessage = err.message || 'Kunde inte ansluta till lobby';
-    ctx.render();
+    if (epoch === viewEpoch) feedbackMessage = err.message || 'Kunde inte ansluta till lobby';
+  } finally {
+    if (epoch === viewEpoch) {
+      lobbyBusy = false;
+      ctx.render();
+    }
   }
 }
 
@@ -509,6 +585,7 @@ function waitingRoomView(ctx) {
         </div>
 
         <div class="waiting-actions">
+          ${feedbackMessage ? html`<p role="alert">${feedbackMessage}</p>` : ''}
           ${
             isHost && guest
               ? html`
@@ -581,6 +658,7 @@ function arenaView(ctx) {
 
   return html`
     <div class="multiplayer-container arena-container">
+      ${feedbackMessage ? html`<p role="alert">${feedbackMessage}</p>` : ''}
       <!-- Arena Top Scoreboard -->
       <header class="arena-header card">
         <div class="arena-player arena-me">
@@ -644,7 +722,15 @@ function arenaView(ctx) {
                         } else {
                           playAnimeSound('nani', ctx.theme);
                         }
-                        await submitAnswer(activeLobbyId, user.uid, roundIdx, choice);
+                        const epoch = viewEpoch;
+                        try {
+                          await submitAnswer(activeLobbyId, user.uid, roundIdx, choice);
+                        } catch (error) {
+                          if (epoch === viewEpoch) {
+                            feedbackMessage = error.message || 'Kunde inte skicka svaret';
+                            ctx.render();
+                          }
+                        }
                       }}
                     >
                       <span class="choice-text">${languageText(choice)}</span>
