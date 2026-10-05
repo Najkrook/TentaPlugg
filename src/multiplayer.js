@@ -41,9 +41,10 @@ export function calculateEloChange(playerElo, opponentElo, scoreOutcome) {
 /**
  * Calculates All-play-all ELO changes for 2 to 10 players.
  * Formula for player i:
- *   delta_i = round( (K / (N - 1)) * sum_{j != i} (S_ij - E_ij) )
+ *   raw_delta_i = (K / (N - 1)) * sum_{j != i} (S_ij - E_ij)
  *   where E_ij = 1 / (1 + 10^((R_j - R_i) / 400))
  *   and S_ij = 1 (if score_i > score_j), 0.5 (if score_i == score_j), 0 (if score_i < score_j).
+ * Integer deltas use largest-remainder rounding to preserve a zero sum before the rating floor.
  * @param {Array<{ uid: string, elo?: number, score?: number }> | Record<string, { elo?: number, score?: number }>} players
  * @param {Record<string, number>} [scoresOverride]
  * @returns {Record<string, number>} Map of uid -> integer ELO delta
@@ -71,6 +72,9 @@ export function calculateMultiplayerEloChanges(players, scoresOverride = null) {
     return result;
   }
 
+  // Stable ordering also keeps floating-point sums independent of lobby join order.
+  playerList.sort((a, b) => (a.uid < b.uid ? -1 : a.uid > b.uid ? 1 : 0));
+  const remainders = [];
   for (let i = 0; i < n; i++) {
     const pi = playerList[i];
     let sum = 0;
@@ -83,8 +87,14 @@ export function calculateMultiplayerEloChanges(players, scoresOverride = null) {
       else if (pi.score < pj.score) outcome = 0;
       sum += outcome - expected;
     }
-    result[pi.uid] = Math.round((K_FACTOR / (n - 1)) * sum);
+    const rawDelta = (K_FACTOR / (n - 1)) * sum;
+    result[pi.uid] = Math.floor(rawDelta);
+    remainders.push({ uid: pi.uid, fraction: rawDelta - result[pi.uid] });
   }
+
+  const pointsToDistribute = -Object.values(result).reduce((sum, delta) => sum + delta, 0);
+  remainders.sort((a, b) => b.fraction - a.fraction);
+  for (let i = 0; i < pointsToDistribute; i++) result[remainders[i].uid]++;
 
   return result;
 }
@@ -386,6 +396,47 @@ function generateWordOrderQuestions(count) {
   return generated;
 }
 
+/** Participants still playing; departed players remain in the match for final ratings. */
+export function getActivePlayerUids(game) {
+  const participants =
+    game.playerUids ||
+    (game.players ? Object.keys(game.players) : [game.hostUid, game.guestUid].filter(Boolean));
+  return participants.filter((uid) => !game.forfeitedUids?.includes(uid));
+}
+
+/** Outcome is per participant: a tie at the top is still a loss for everyone below it. */
+export function getPlayerMatchOutcome(game, uid) {
+  if (game.forfeitedUids?.includes(uid)) return 'loss';
+  if (game.winnerUid === uid) return 'win';
+  const scores = game.scores || {};
+  const topScore = Math.max(...Object.values(scores));
+  return game.isDraw && scores[uid] === topScore ? 'draw' : 'loss';
+}
+
+function closeRound(game, now, playersMap = null) {
+  if (game.currentRoundIndex >= game.questions.length - 1) {
+    return finalizeMatch(game, now, playersMap);
+  }
+  const roundAnswers = game.answers?.[game.currentRoundIndex] || {};
+  const leaderboardSnapshot = Object.values(playersMap || game.players || {})
+    .map((p) => ({
+      uid: p.uid,
+      displayName: p.displayName,
+      photoURL: p.photoURL || null,
+      score: game.scores?.[p.uid] || 0,
+      roundPoints: roundAnswers[p.uid]?.pointsAwarded || 0,
+    }))
+    .sort((a, b) => b.score - a.score);
+  return {
+    ...game,
+    leaderboardSnapshot,
+    status: 'round_end',
+    roundWinner: game.roundWinners?.[game.currentRoundIndex] || 'none',
+    roundEndAt: now,
+    nextRoundAt: now + ROUND_PAUSE_MS,
+  };
+}
+
 /**
  * Pure evaluation function for answering a round in a game.
  * Strictly checks:
@@ -400,8 +451,10 @@ function generateWordOrderQuestions(count) {
  *
  * Adaptively ends round when all active players have answered.
  */
-export function evaluateRound(game, uid, selectedAnswer, now = Date.now()) {
+export function evaluateRound(game, uid, selectedAnswer, now = Date.now(), playersMap = null) {
   if (!game || game.status !== 'playing') return game;
+  const playerUids = getActivePlayerUids(game);
+  if (!playerUids.includes(uid)) return game;
 
   const roundIdx = game.currentRoundIndex || 0;
   const currentQ = game.questions?.[roundIdx];
@@ -428,6 +481,8 @@ export function evaluateRound(game, uid, selectedAnswer, now = Date.now()) {
   const pointsAwarded = calculateTimePoints(isCorrect, responseTimeMs);
 
   roundAnswers[uid] = {
+    uid,
+    roundIndex: roundIdx,
     answer: selectedAnswer,
     timestamp: now,
     isCorrect,
@@ -446,7 +501,7 @@ export function evaluateRound(game, uid, selectedAnswer, now = Date.now()) {
   }
 
   const answers = { ...(game.answers || {}), [roundIdx]: roundAnswers };
-  let updated = {
+  const updated = {
     ...game,
     scores: newScores,
     answers,
@@ -454,31 +509,9 @@ export function evaluateRound(game, uid, selectedAnswer, now = Date.now()) {
     roundWinner,
   };
 
-  // Determine all active participants
-  const playerUids =
-    game.playerUids ||
-    (game.players ? Object.keys(game.players) : [game.hostUid, game.guestUid].filter(Boolean));
-
-  const allAnswered =
-    playerUids.length > 0
-      ? playerUids.every((id) => Boolean(roundAnswers[id]))
-      : Object.keys(newScores).length > 0 &&
-        Object.keys(newScores).every((id) => Boolean(roundAnswers[id]));
-
-  if (allAnswered) {
-    if (roundIdx >= game.questions.length - 1) {
-      return finalizeMatch(updated, now);
-    } else {
-      updated = {
-        ...updated,
-        status: 'round_end',
-        roundEndAt: now,
-        nextRoundAt: now + ROUND_PAUSE_MS,
-      };
-    }
-  }
-
-  return updated;
+  return playerUids.every((id) => Boolean(roundAnswers[id]))
+    ? closeRound(updated, now, playersMap)
+    : updated;
 }
 
 /**
@@ -522,9 +555,10 @@ export function finalizeMatch(game, now = Date.now(), playersMap = null) {
     return { uid, elo, score };
   });
 
-  const scoresList = playersList.map((p) => p.score);
+  const eligiblePlayers = playersList.filter((p) => !game.forfeitedUids?.includes(p.uid));
+  const scoresList = eligiblePlayers.map((p) => p.score);
   const maxScore = scoresList.length > 0 ? Math.max(...scoresList) : 0;
-  const topPlayers = playersList.filter((p) => p.score === maxScore);
+  const topPlayers = eligiblePlayers.filter((p) => p.score === maxScore);
   const isDraw = topPlayers.length > 1;
   const winnerUid = isDraw || topPlayers.length === 0 ? null : topPlayers[0].uid;
 
@@ -847,98 +881,27 @@ export async function submitPlayerAnswer(lobbyId, uid, roundIndex, selectedAnswe
     const game = data.game;
     const now = Date.now();
 
-    // Guard checks:
-    if (game.status !== 'playing') return null;
     if (game.currentRoundIndex !== roundIndex) return null;
-    if (game.roundStartTime && now < game.roundStartTime) return null;
-    if (game.roundStartTime && now - game.roundStartTime > ROUND_TIME_MS) return null;
-    if (game.answers?.[roundIndex]?.[uid]) return null;
-
-    const currentQ = game.questions?.[roundIndex];
-    if (!currentQ) return null;
-
-    const isCorrect = isAnswerCorrect(currentQ, selectedAnswer);
-    const responseTimeMs = Math.max(0, now - (game.roundStartTime || now));
-    const pointsAwarded = calculateTimePoints(isCorrect, responseTimeMs);
-
-    // Atomically write answer document in subcollection
-    const answerDoc = {
-      roundIndex,
-      uid,
-      answer: selectedAnswer,
-      timestamp: now,
-      isCorrect,
-      pointsAwarded,
-    };
-    tx.set(answerRef, answerDoc);
-
-    // Update in-memory round answers & scores
-    const roundAnswers = { ...(game.answers?.[roundIndex] || {}) };
-    roundAnswers[uid] = answerDoc;
-
-    const newScores = { ...(game.scores || {}) };
-    newScores[uid] = (newScores[uid] || 0) + pointsAwarded;
+    const updatedGame = evaluateRound(game, uid, selectedAnswer, now, data.players);
+    if (updatedGame === game) return null;
 
     const updatedPlayers = { ...(data.players || {}) };
     if (updatedPlayers[uid]) {
-      updatedPlayers[uid] = {
-        ...updatedPlayers[uid],
-        score: newScores[uid],
-      };
+      updatedPlayers[uid] = { ...updatedPlayers[uid], score: updatedGame.scores[uid] };
     }
 
-    const roundWinners = { ...(game.roundWinners || {}) };
-    let roundWinner = game.roundWinner || null;
-    if (isCorrect && !roundWinners[roundIndex]) {
-      roundWinners[roundIndex] = uid;
-      roundWinner = uid;
+    if (updatedGame.status === 'finished') {
+      // This helper reads every profile before queuing writes. The answer must be queued after it.
+      await finishMatchInTransaction(tx, lobbyRef, lobbyId, updatedGame, now, updatedPlayers);
+    } else {
+      tx.update(lobbyRef, {
+        game: updatedGame,
+        players: updatedPlayers,
+        status: updatedGame.status,
+        updatedAt: now,
+      });
     }
-
-    let updatedGame = {
-      ...game,
-      scores: newScores,
-      answers: { ...(game.answers || {}), [roundIndex]: roundAnswers },
-      roundWinners,
-      roundWinner,
-    };
-
-    const activeUids =
-      Object.keys(updatedPlayers).length > 0
-        ? Object.keys(updatedPlayers)
-        : game.playerUids || [game.hostUid, game.guestUid].filter(Boolean);
-
-    const allAnswered =
-      activeUids.length > 0 && activeUids.every((id) => Boolean(roundAnswers[id]));
-
-    if (allAnswered) {
-      if (roundIndex >= game.questions.length - 1) {
-        updatedGame = finalizeMatch(updatedGame, now, updatedPlayers);
-        await finishMatchInTransaction(tx, lobbyRef, lobbyId, updatedGame, now, updatedPlayers);
-        return updatedGame;
-      } else {
-        const leaderboardSnapshot = Object.values(updatedPlayers)
-          .map((p) => ({
-            uid: p.uid,
-            displayName: p.displayName,
-            photoURL: p.photoURL || null,
-            score: newScores[p.uid] || 0,
-            roundPoints: roundAnswers[p.uid]?.pointsAwarded || 0,
-          }))
-          .sort((a, b) => b.score - a.score);
-
-        updatedGame.leaderboardSnapshot = leaderboardSnapshot;
-        updatedGame.status = 'round_end';
-        updatedGame.roundEndAt = now;
-        updatedGame.nextRoundAt = now + ROUND_PAUSE_MS;
-      }
-    }
-
-    tx.update(lobbyRef, {
-      game: updatedGame,
-      players: updatedPlayers,
-      status: updatedGame.status,
-      updatedAt: now,
-    });
+    tx.set(answerRef, updatedGame.answers[roundIndex][uid]);
 
     return updatedGame;
   });
@@ -972,39 +935,12 @@ export async function advanceRoundIfDue(lobbyId) {
       game.roundStartTime &&
       now - game.roundStartTime > ROUND_TIME_MS
     ) {
-      const roundIdx = game.currentRoundIndex || 0;
-      const roundAnswers = game.answers?.[roundIdx] || {};
       const playersMap = data.players || {};
-      const scores = game.scores || {};
-
-      const leaderboardSnapshot = Object.values(playersMap)
-        .map((p) => ({
-          uid: p.uid,
-          displayName: p.displayName,
-          photoURL: p.photoURL || null,
-          score: scores[p.uid] || 0,
-          roundPoints: roundAnswers[p.uid]?.pointsAwarded || 0,
-        }))
-        .sort((a, b) => b.score - a.score);
-
-      const updated = {
-        ...game,
-        leaderboardSnapshot,
-        roundWinner: game.roundWinners?.[roundIdx] || 'none',
-      };
-
-      if (roundIdx >= game.questions.length - 1) {
-        const finalGame = finalizeMatch(updated, now, playersMap);
-        await finishMatchInTransaction(tx, lobbyRef, lobbyId, finalGame, now, playersMap);
+      const updated = closeRound(game, now, playersMap);
+      if (updated.status === 'finished') {
+        await finishMatchInTransaction(tx, lobbyRef, lobbyId, updated, now, playersMap);
       } else {
-        updated.status = 'round_end';
-        updated.roundEndAt = now;
-        updated.nextRoundAt = now + ROUND_PAUSE_MS;
-        tx.update(lobbyRef, {
-          game: updated,
-          status: 'round_end',
-          updatedAt: now,
-        });
+        tx.update(lobbyRef, { game: updated, status: updated.status, updatedAt: now });
       }
     }
   });
@@ -1015,56 +951,45 @@ export async function advanceRoundIfDue(lobbyId) {
  */
 async function applyForfeitInTransaction(tx, lobbyRef, lobbyData, forfeitingUid, now) {
   const game = lobbyData.game;
-  const playersMap = lobbyData.players || {};
-  let uids = Object.keys(playersMap);
-  if (uids.length === 0) {
-    if (lobbyData.host?.uid) uids.push(lobbyData.host.uid);
-    if (lobbyData.guest?.uid) uids.push(lobbyData.guest.uid);
+  const activeUids = getActivePlayerUids(game);
+  if (!activeUids.includes(forfeitingUid)) return;
+
+  // Keep all participants for final ratings, but no longer wait for a departed player's answers.
+  const scores = { ...game.scores, [forfeitingUid]: -9999 };
+  const playersMap = { ...(lobbyData.players || {}) };
+  if (playersMap[forfeitingUid]) {
+    playersMap[forfeitingUid] = { ...playersMap[forfeitingUid], score: scores[forfeitingUid] };
   }
-
-  const hostUid = lobbyData.host.uid;
-  const guestUid =
-    lobbyData.guest?.uid ||
-    uids.find((id) => id !== hostUid) ||
-    (uids[0] !== hostUid ? uids[0] : null);
-
-  let winnerUid = null;
-  const remainingUids = uids.filter((id) => id !== forfeitingUid);
-  if (remainingUids.length === 1) {
-    winnerUid = remainingUids[0];
-  } else if (remainingUids.length > 1) {
-    const scores = game?.scores || {};
-    winnerUid = remainingUids.reduce((best, curr) =>
-      (scores[curr] || 0) > (scores[best] || 0) ? curr : best,
-    );
-  }
-
-  const scores = { ...(game?.scores || {}) };
-  scores[forfeitingUid] = -9999; // Penalty for forfeit
-
-  const playersList = uids.map((uid) => ({
-    uid,
-    elo:
-      playersMap[uid]?.elo ||
-      (uid === hostUid ? lobbyData.host.elo : lobbyData.guest?.elo) ||
-      DEFAULT_ELO,
-    score: scores[uid] || 0,
-  }));
-
-  const eloChanges = calculateMultiplayerEloChanges(playersList);
-
-  const finishedGame = {
-    ...(game || {}),
-    status: 'finished',
-    winnerUid,
-    isDraw: false,
-    forfeitedBy: forfeitingUid,
-    finishedAt: now,
+  let updated = {
+    ...game,
     scores,
-    eloChanges,
+    forfeitedBy: forfeitingUid,
+    forfeitedUids: [...(game.forfeitedUids || []), forfeitingUid],
   };
+  const remaining = getActivePlayerUids(updated);
+  if (remaining.length <= 1) {
+    updated = finalizeMatch(updated, now, playersMap);
+  } else if (
+    updated.status === 'playing' &&
+    remaining.every((uid) => Boolean(updated.answers?.[updated.currentRoundIndex]?.[uid]))
+  ) {
+    updated = closeRound(updated, now, playersMap);
+  } else if (updated.leaderboardSnapshot) {
+    updated.leaderboardSnapshot = updated.leaderboardSnapshot
+      .map((p) => ({ ...p, score: scores[p.uid] || 0 }))
+      .sort((a, b) => b.score - a.score);
+  }
 
-  await finishMatchInTransaction(tx, lobbyRef, lobbyData.id, finishedGame, now, playersMap);
+  if (updated.status === 'finished') {
+    await finishMatchInTransaction(tx, lobbyRef, lobbyData.id, updated, now, playersMap);
+  } else {
+    tx.update(lobbyRef, {
+      game: updated,
+      players: playersMap,
+      status: updated.status,
+      updatedAt: now,
+    });
+  }
 }
 
 /**
@@ -1091,9 +1016,6 @@ async function finishMatchInTransaction(tx, lobbyRef, matchId, game, now, player
   const refs = uniqueUids.map((uid) => doc(db, 'leaderboard', uid));
   const snapshots = await Promise.all(refs.map((ref) => tx.get(ref)));
 
-  const winnerUid = game.winnerUid;
-  const isDraw = game.isDraw;
-
   for (const [index, uid] of uniqueUids.entries()) {
     const leadRef = refs[index];
     const snap = snapshots[index];
@@ -1111,8 +1033,10 @@ async function finishMatchInTransaction(tx, lobbyRef, matchId, game, now, player
           matchesPlayed: 0,
         };
 
-    const isWinner = winnerUid === uid;
-    const isLoss = !isWinner && !isDraw;
+    const outcome = getPlayerMatchOutcome(game, uid);
+    const isWinner = outcome === 'win';
+    const isDraw = outcome === 'draw';
+    const isLoss = outcome === 'loss';
     const diff = game.eloChanges?.[uid] || 0;
     const newElo = applyElo(existing.elo, diff);
 
@@ -1130,7 +1054,12 @@ async function finishMatchInTransaction(tx, lobbyRef, matchId, game, now, player
 
     tx.set(leadRef, updated);
   }
-  tx.update(lobbyRef, { status: 'finished', game, updatedAt: now });
+  tx.update(lobbyRef, {
+    status: 'finished',
+    game,
+    updatedAt: now,
+    ...(playersMap ? { players: playersMap } : {}),
+  });
 }
 
 /**

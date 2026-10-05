@@ -12,6 +12,8 @@ import {
   subscribeToLobby,
   subscribeToOpenLobbies,
   subscribeToLeaderboard,
+  getActivePlayerUids,
+  getPlayerMatchOutcome,
   DEFAULT_ELO,
   ROUND_TIME_MS,
   MAX_PLAYERS,
@@ -671,10 +673,12 @@ function arenaView(ctx) {
     ...(currentLobbyData.guest ? { [currentLobbyData.guest.uid]: currentLobbyData.guest } : {}),
   };
   const allPlayers = Object.values(playersMap);
-  const totalPlayers = allPlayers.length;
+  const activeUids = getActivePlayerUids(game);
+  const totalPlayers = activeUids.length;
+  const hasForfeited = game.forfeitedUids?.includes(user.uid);
 
   const roundAnswers = game.answers?.[roundIdx] || {};
-  const answeredCount = Object.keys(roundAnswers).length;
+  const answeredCount = activeUids.filter((uid) => Boolean(roundAnswers[uid])).length;
   const myAnswer = roundAnswers[user.uid];
   const hasAnswered = Boolean(myAnswer);
   const roundWinners = game.roundWinners || {};
@@ -703,6 +707,7 @@ function arenaView(ctx) {
   return html`
     <div class="multiplayer-container arena-container">
       ${feedbackMessage ? html`<p class="feedback-msg" role="alert">${feedbackMessage}</p>` : ''}
+      ${hasForfeited ? html`<p role="status">Du har lämnat matchen. Övriga spelare fortsätter.</p>` : ''}
 
       <!-- Arena Top Scoreboard -->
       <header class="arena-header card">
@@ -767,9 +772,9 @@ function arenaView(ctx) {
                     <button
                       type="button"
                       class="choice-btn ${btnState}"
-                      ?disabled=${hasAnswered || game.status !== 'playing'}
+                      ?disabled=${hasAnswered || hasForfeited || game.status !== 'playing'}
                       @click=${async () => {
-                        if (hasAnswered || game.status !== 'playing') return;
+                        if (hasAnswered || hasForfeited || game.status !== 'playing') return;
                         const isCorrect = choice === currentQ.correctAnswer;
                         if (isCorrect) {
                           playAnimeSound('wow', ctx.theme);
@@ -895,8 +900,9 @@ function matchResultView(ctx) {
     .sort((a, b) => b.score - a.score);
 
   const myRank = sortedFinal.findIndex((p) => p.uid === user.uid) + 1 || 1;
-  const isWinner = game.winnerUid === user.uid;
-  const isDraw = game.isDraw;
+  const outcome = getPlayerMatchOutcome(game, user.uid);
+  const isWinner = outcome === 'win';
+  const isDraw = outcome === 'draw';
   const myEloDiff = game.eloChanges?.[user.uid] || 0;
   const myFinalScore = scores[user.uid] || 0;
 
@@ -1028,6 +1034,7 @@ function matchResultView(ctx) {
                                 >`
                           }
                           <strong>${p.displayName}</strong>
+                          ${game.forfeitedUids?.includes(p.uid) ? html`<span>Lämnat</span>` : ''}
                           ${isMe ? html`<span class="tag-you">Du</span>` : ''}
                         </div>
                       </td>

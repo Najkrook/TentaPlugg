@@ -10,6 +10,8 @@ import {
   evaluateRound,
   advanceToNextRound,
   finalizeMatch,
+  getActivePlayerUids,
+  getPlayerMatchOutcome,
   isAnswerCorrect,
   buildFourChoices,
   DEFAULT_ELO,
@@ -71,6 +73,38 @@ test('Multiplayer All-play-all ELO distributes points fairly for 10 players', ()
   // Conservation: total delta sum across all 10 players must equal 0 (no ELO inflation)
   const sumDeltas = Object.values(changes).reduce((a, b) => a + b, 0);
   assert.equal(sumDeltas, 0, 'Sum of all ELO changes in all-play-all must be exactly 0');
+});
+
+test('All-play-all rounding conserves ELO with mixed ratings and is independent of input order', () => {
+  const players = [
+    { uid: 'a', elo: 1000, score: 3000 },
+    { uid: 'b', elo: 1000, score: 2000 },
+    { uid: 'c', elo: 1300, score: 1000 },
+  ];
+  const deltas = calculateMultiplayerEloChanges(players);
+  assert.equal(
+    Object.values(deltas).reduce((sum, delta) => sum + delta, 0),
+    0,
+  );
+  assert.deepEqual(calculateMultiplayerEloChanges([...players].reverse()), deltas);
+  for (let count = 2; count <= 10; count++) {
+    for (let seed = 0; seed < 100; seed++) {
+      const field = Array.from({ length: count }, (_, i) => ({
+        uid: `player-${i}`,
+        elo: 100 + ((seed * 71 + i * 137) % 2400),
+        score: ((seed * 17 + i * 31) % 5) * 250,
+      }));
+      const changes = calculateMultiplayerEloChanges(field);
+      assert.equal(
+        Object.values(changes).reduce((sum, delta) => sum + delta, 0),
+        0,
+      );
+      assert(
+        Object.values(changes).every((delta) => Number.isInteger(delta) && Math.abs(delta) <= 32),
+      );
+      assert.deepEqual(calculateMultiplayerEloChanges([...field].reverse()), changes);
+    }
+  }
 });
 
 test('Time-based scoring awards points based on speed and penalizes incorrect answers', () => {
@@ -371,4 +405,30 @@ test('Match finalization properly handles draws with equal scores', () => {
   assert.equal(finished.isDraw, true);
   assert.equal(finished.eloChanges.alice, 0);
   assert.equal(finished.eloChanges.bob, 0);
+});
+
+test('shared first place is a draw only for the players tied at the top', () => {
+  const game = finalizeMatch({ scores: { a: 1000, b: 1000, c: 0 } });
+  assert.equal(getPlayerMatchOutcome(game, 'a'), 'draw');
+  assert.equal(getPlayerMatchOutcome(game, 'b'), 'draw');
+  assert.equal(getPlayerMatchOutcome(game, 'c'), 'loss');
+});
+
+test('round completion excludes forfeited players and their previously submitted answers', () => {
+  const game = {
+    status: 'playing',
+    questions: [{ correctAnswer: 'A' }, { correctAnswer: 'B' }],
+    currentRoundIndex: 0,
+    roundStartTime: 1000,
+    playerUids: ['a', 'b', 'c'],
+    forfeitedUids: ['c'],
+    scores: { a: 0, b: 0, c: -9999 },
+    answers: { 0: { c: { answer: 'A' } } },
+  };
+  assert.deepEqual(getActivePlayerUids(game), ['a', 'b']);
+  assert.equal(evaluateRound(game, 'c', 'A', 2000), game);
+  assert.equal(evaluateRound(game, 'outsider', 'A', 2000), game);
+  const first = evaluateRound(game, 'a', 'A', 2000);
+  assert.equal(first.status, 'playing');
+  assert.equal(evaluateRound(first, 'b', 'A', 2100).status, 'round_end');
 });

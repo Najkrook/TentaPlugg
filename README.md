@@ -16,7 +16,7 @@ Om Windows-sandlådan blockerar testprocesser: `node --test --test-isolation=non
 ## Innehåll
 
 - Tre tentor med samtliga uppgifter, uppdelade i 138 delfrågor.
-- 1v1 Multiplayer Duell: realtidsmatcher med Google-inloggning och ELO-ranking (1200 bas, K=32) över tre grenar (Partikel 1v1, Vokabulär 1v1 baserat på Genki Lektion 3–5, och Ordföljd & Meningar 1v1). 10 snabba frågor med 4 flervalsknappar; snabbast korrekta svar ger +1 poäng och felaktigt svar ger -1 poäng.
+- Flerspelararena för 2–10 spelare: realtidsmatcher med Google-inloggning och ELO-ranking (1200 bas, K=32) över tre grenar (Partiklar, Vokabulär baserat på Genki Lektion 3–5, och Ordföljd & Meningar). 10 frågor med 4 svarsalternativ; rätt svar ger 200–1000 poäng beroende på svarstid och fel svar ger −250. ELO jämför alla deltagare parvis och avrundas med bibehållen nollsumma före minimigränsen 100. Om någon lämnar fortsätter kvarvarande spelare så länge minst två är kvar; avhopp registreras som förlust vid matchavslut. Delad förstaplats räknas som oavgjort endast för de spelare som delar förstaplatsen.
 - 27 partikelluckor med originalfacit från Lesson5, dess sex bedömningsövningar och kompletterande övningar.
 - I nya träningspass har de sex meningsövningarna två steg: markera partiklar och rätta markeringarna, sedan byta, flytta, lägga till eller ta bort partiklar direkt i meningen. Klockslagsövningen är bearbetad till ett tydligt partikelfel. Originalmaterialet är kvar.
 - Båda stegen sparas och visas separat. Det automatiska resultatet kräver rätt i båda stegen; självskattningen kan därefter justera repetitionsbedömningen. Luckövningar och tentaläge behåller sina tidigare flöden.
@@ -59,7 +59,7 @@ Sparmodell v2 migrerar tidigare lokala och molnsparade data; den befintliga lagr
 
 ## Testa och förbered CI
 
-Node 22+ och Java 21 krävs för hela testsuiten:
+Node 22.15+ och Java 21 krävs för hela testsuiten:
 
 ```powershell
 npm ci

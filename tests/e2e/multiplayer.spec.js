@@ -50,7 +50,10 @@ async function create(page) {
 
 async function join(page, code) {
   await page.locator('.code-input').fill(code);
-  await page.getByRole('button', { name: 'Gå med', exact: true }).click();
+  await page
+    .locator('.join-code-card')
+    .getByRole('button', { name: 'Gå med', exact: true })
+    .click();
   await expect(page.locator('.room-code-tag')).toHaveText(code);
 }
 
@@ -75,6 +78,11 @@ test('two new players can complete ten rounds and record both ratings exactly on
         .locator('.choices-grid')
         .getByRole('button', { name: answer, exact: true })
         .click();
+      const wrongAnswer = lobby.game.questions[round].choices.find((choice) => choice !== answer);
+      await guest
+        .locator('.choices-grid')
+        .getByRole('button', { name: wrongAnswer, exact: true })
+        .click();
       if (round < 9)
         await expect(page.locator('.round-end-banner')).toContainText('Du var snabbast');
     }
@@ -84,6 +92,9 @@ test('two new players can complete ten rounds and record both ratings exactly on
     const opponent = await read(page, 'leaderboard', guestUid);
     expect(host).toMatchObject({ elo: 1216, wins: 1, matchesPlayed: 1 });
     expect(opponent).toMatchObject({ elo: 1184, losses: 1, matchesPlayed: 1 });
+    const finished = await read(page, 'lobbies', code);
+    expect(finished.game.answers[9][guestUid].pointsAwarded).toBe(-250);
+    expect(finished.game.scores[guestUid]).toBe(-2500);
     // A late request from the other client must not record a second result.
     await guest.evaluate(async (code) => {
       const { advanceRoundIfDue, leaveLobby } = await import('/src/multiplayer.js');
@@ -104,6 +115,95 @@ test('two new players can complete ten rounds and record both ratings exactly on
     }
   } finally {
     await guest.close();
+  }
+});
+
+test('a three-player tie shows a loss to third place', async ({ page, browser }, testInfo) => {
+  const second = await browser.newPage();
+  const third = await browser.newPage();
+  const errors = [];
+  for (const client of [page, second, third])
+    client.on('pageerror', (error) => errors.push(error.message));
+  try {
+    const ids = [await login(page), await login(second), await login(third)];
+    const code = await create(page);
+    await join(second, code);
+    await join(third, code);
+    await page.getByRole('button', { name: 'Starta matchen!' }).click();
+    await expect(third.locator('.round-badge')).toBeVisible();
+    await page.evaluate(
+      async ({ code, ids }) => {
+        const { db } = await import('/src/cloud.js');
+        const { doc, updateDoc } = window.multiplayerTestFirestore;
+        await updateDoc(doc(db, 'lobbies', code), {
+          'game.currentRoundIndex': 9,
+          'game.roundStartTime': Date.now() - 9000,
+          'game.scores': { [ids[0]]: 1000, [ids[1]]: 1000, [ids[2]]: 0 },
+        });
+      },
+      { code, ids },
+    );
+    await expect(page.locator('.result-card h1')).toContainText('Oavgjort');
+    await expect(second.locator('.result-card h1')).toContainText('Oavgjort');
+    await expect(third.locator('.result-card h1')).toContainText('Förlust! (Plats #3 av 3)');
+    expect(await read(third, 'leaderboard', ids[2])).toMatchObject({
+      losses: 1,
+      draws: 0,
+      matchesPlayed: 1,
+    });
+    const layout = await third.locator('.result-card').evaluate((card) => ({
+      right: card.getBoundingClientRect().right,
+      viewportWidth: window.innerWidth,
+      overflow: card.scrollWidth - card.clientWidth,
+    }));
+    expect(layout.right).toBeLessThanOrEqual(layout.viewportWidth);
+    expect(layout.overflow).toBeLessThanOrEqual(1);
+    expect(errors).toEqual([]);
+    if (process.env.MULTIPLAYER_SCREENSHOT_DIR) {
+      await third.screenshot({
+        scale: 'css',
+        path: path.join(
+          process.env.MULTIPLAYER_SCREENSHOT_DIR,
+          `arena-tie-${testInfo.project.name}.png`,
+        ),
+      });
+    }
+  } finally {
+    await second.close();
+    await third.close();
+  }
+});
+
+test('remaining players finish a round after the host leaves', async ({ page, browser }) => {
+  const second = await browser.newPage();
+  const third = await browser.newPage();
+  try {
+    await login(page);
+    await login(second);
+    await login(third);
+    const code = await create(page);
+    await join(second, code);
+    await join(third, code);
+    await page.getByRole('button', { name: 'Starta matchen!' }).click();
+    await expect(third.locator('.round-badge')).toBeVisible();
+    await page
+      .getByRole('button', { name: 'Plugga', exact: true })
+      .filter({ visible: true })
+      .click();
+    await expect(second.locator('.answered-badge')).toContainText('0/2 har svarat');
+    const answer = (await read(second, 'lobbies', code)).game.questions[0].correctAnswer;
+    await second
+      .locator('.choices-grid')
+      .getByRole('button', { name: answer, exact: true })
+      .click();
+    await expect(third.locator('.answered-badge')).toContainText('1/2 har svarat');
+    await third.locator('.choices-grid').getByRole('button', { name: answer, exact: true }).click();
+    await expect(third.locator('.round-end-banner')).toBeVisible();
+    await expect(second.locator('.round-badge')).toHaveText('Fråga 2 / 10');
+    await expect(second.locator('.answered-badge')).toContainText('0/2 har svarat');
+  } finally {
+    await second.close();
+    await third.close();
   }
 });
 
