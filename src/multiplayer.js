@@ -15,12 +15,14 @@ import { db } from './cloud.js';
 import { questions } from './data.js';
 import { extraQuestions } from './extra-content.js';
 import { vocabularyList, kanjiList } from './vocabulary-data.js';
+import { normalize } from './engine.js';
 
 export const DEFAULT_ELO = 1200;
 export const K_FACTOR = 32;
 export const ROUND_TIME_MS = 8000;
 export const ROUND_PAUSE_MS = 1500;
 export const QUESTIONS_PER_MATCH = 10;
+export const HEARTBEAT_TTL_MS = 45000; // 45s heartbeat timeout for lobbies
 
 /**
  * Calculates ELO change based on standard FIDE Elo rating formula.
@@ -41,6 +43,50 @@ export function calculateEloChange(playerElo, opponentElo, scoreOutcome) {
  */
 export function applyElo(currentElo, delta) {
   return Math.max(100, Math.round((currentElo || DEFAULT_ELO) + delta));
+}
+
+/**
+ * Checks whether an answer matches any of the question's accepted valid answers.
+ */
+export function isAnswerCorrect(question, answer) {
+  if (!question || answer === undefined || answer === null) return false;
+  const norm = normalize(answer);
+  if (Array.isArray(question.validAnswers) && question.validAnswers.length > 0) {
+    return question.validAnswers.some((v) => normalize(v) === norm);
+  }
+  return normalize(question.correctAnswer) === norm;
+}
+
+/**
+ * Builds 4 distinct choices ensuring no valid alternative answer is used as a distractor.
+ */
+export function buildFourChoices(primaryAnswer, validAnswers, distractorPool) {
+  const normalizedValids = (validAnswers || [primaryAnswer]).map((a) => normalize(a));
+  const seen = new Set();
+  seen.add(normalize(primaryAnswer));
+  for (const v of normalizedValids) seen.add(v);
+
+  const safeDistractors = [];
+  for (const d of shuffle(distractorPool)) {
+    const normD = normalize(d);
+    if (!seen.has(normD)) {
+      seen.add(normD);
+      safeDistractors.push(d);
+      if (safeDistractors.length === 3) break;
+    }
+  }
+
+  // If pool was too small, pad with safe fallback identifiers
+  let padIndex = 1;
+  while (safeDistractors.length < 3) {
+    const fallback = `Alternativ ${padIndex++}`;
+    if (!seen.has(normalize(fallback))) {
+      seen.add(normalize(fallback));
+      safeDistractors.push(fallback);
+    }
+  }
+
+  return shuffle([primaryAnswer, ...safeDistractors.slice(0, 3)]);
 }
 
 /**
@@ -68,7 +114,7 @@ function shuffle(array) {
  * Generates 10 multiple-choice questions for the chosen category with 4 distinct options.
  * @param {'particles' | 'vocab' | 'word_order'} category
  * @param {number} count
- * @returns {Array<{ id: string, prompt: string, choices: string[], correctAnswer: string, explanation: string }>}
+ * @returns {Array<{ id: string, prompt: string, choices: string[], correctAnswer: string, validAnswers: string[], explanation: string }>}
  */
 export function generateQuestionsForCategory(category, count = QUESTIONS_PER_MATCH) {
   if (category === 'particles') {
@@ -88,13 +134,15 @@ function generateParticleQuestions(count) {
   const particleOptions = ['は', 'が', 'を', 'に', 'で', 'へ', 'と', 'も', 'から', 'まで', '×'];
 
   return selected.map((q, idx) => {
-    const correct = (q.answers && q.answers[0]) || '×';
-    const otherParticles = shuffle(particleOptions.filter((p) => p !== correct));
-    const choices = shuffle([correct, ...otherParticles.slice(0, 3)]);
+    const validAnswers = q.answers && q.answers.length > 0 ? q.answers : ['×'];
+    const primary = validAnswers[0];
+    const choices = buildFourChoices(primary, validAnswers, particleOptions);
+
     return {
       id: `p-${q.id || idx}`,
       prompt: q.prompt,
-      correctAnswer: correct,
+      correctAnswer: primary,
+      validAnswers,
       choices,
       explanation: q.explanation || '',
     };
@@ -110,65 +158,63 @@ function generateVocabQuestions(count) {
     const type = i % 3; // 0: SV -> JA, 1: JA -> SV, 2: Kanji meaning
     if (type === 0) {
       const target = items[i % items.length];
-      const correct =
+      const primary =
         target.kanji && target.kanji !== target.kana
           ? `${target.kana} (${target.kanji})`
           : target.kana;
+      const validAnswers = [primary, target.kana];
+      if (target.kanji) validAnswers.push(target.kanji);
+
       const sameType = items.filter((v) => v.id !== target.id && v.wordType === target.wordType);
-      const distractorPool =
-        sameType.length >= 3 ? sameType : items.filter((v) => v.id !== target.id);
-      const distractors = shuffle(distractorPool)
-        .slice(0, 3)
-        .map((d) => (d.kanji && d.kanji !== d.kana ? `${d.kana} (${d.kanji})` : d.kana));
-      const choices = shuffle(Array.from(new Set([correct, ...distractors])));
-      while (choices.length < 4) {
-        const extra = items[Math.floor(Math.random() * items.length)].kana;
-        if (!choices.includes(extra)) choices.push(extra);
-      }
+      const distractorPool = (
+        sameType.length >= 3 ? sameType : items.filter((v) => v.id !== target.id)
+      ).map((d) => (d.kanji && d.kanji !== d.kana ? `${d.kana} (${d.kanji})` : d.kana));
+
+      const choices = buildFourChoices(primary, validAnswers, distractorPool);
+
       generated.push({
         id: `v-sv2ja-${target.id}`,
         prompt: `Vad heter "${target.sv}" på japanska?`,
-        correctAnswer: correct,
-        choices: shuffle(choices.slice(0, 4)),
+        correctAnswer: primary,
+        validAnswers,
+        choices,
         explanation: `${target.sv} = ${target.kana}${target.kanji ? ` (${target.kanji})` : ''} [${target.romaji}]`,
       });
     } else if (type === 1) {
       const target = items[(i + 20) % items.length];
-      const correct = target.sv;
+      const primary = target.sv;
+      const validAnswers = [target.sv];
+      if (target.en) validAnswers.push(target.en);
+
       const sameType = items.filter((v) => v.id !== target.id && v.wordType === target.wordType);
-      const distractorPool =
-        sameType.length >= 3 ? sameType : items.filter((v) => v.id !== target.id);
-      const distractors = shuffle(distractorPool)
-        .slice(0, 3)
-        .map((d) => d.sv);
-      const choices = shuffle(Array.from(new Set([correct, ...distractors])));
-      while (choices.length < 4) {
-        const extra = items[Math.floor(Math.random() * items.length)].sv;
-        if (!choices.includes(extra)) choices.push(extra);
-      }
+      const distractorPool = (
+        sameType.length >= 3 ? sameType : items.filter((v) => v.id !== target.id)
+      ).map((d) => d.sv);
+
+      const choices = buildFourChoices(primary, validAnswers, distractorPool);
+
       generated.push({
         id: `v-ja2sv-${target.id}`,
         prompt: `Vad betyder "${target.kanji || target.kana}"?`,
-        correctAnswer: correct,
-        choices: shuffle(choices.slice(0, 4)),
+        correctAnswer: primary,
+        validAnswers,
+        choices,
         explanation: `${target.kanji || target.kana} (${target.romaji}) betyder: ${target.sv}`,
       });
     } else {
       const target = kanjis[i % kanjis.length];
-      const correct = target.meaning_sv;
-      const distractors = shuffle(kanjis.filter((k) => k.id !== target.id))
-        .slice(0, 3)
-        .map((k) => k.meaning_sv);
-      const choices = shuffle(Array.from(new Set([correct, ...distractors])));
-      while (choices.length < 4) {
-        const extra = kanjis[Math.floor(Math.random() * kanjis.length)].meaning_sv;
-        if (!choices.includes(extra)) choices.push(extra);
-      }
+      const primary = target.meaning_sv;
+      const validAnswers = [target.meaning_sv, target.meaning_en];
+
+      const distractorPool = kanjis.filter((k) => k.id !== target.id).map((k) => k.meaning_sv);
+      const choices = buildFourChoices(primary, validAnswers, distractorPool);
+
       generated.push({
         id: `v-kanji-${target.id}`,
         prompt: `Vad betyder tecknet 「${target.kanji}」?`,
-        correctAnswer: correct,
-        choices: shuffle(choices.slice(0, 4)),
+        correctAnswer: primary,
+        validAnswers,
+        choices,
         explanation: `Kanji ${target.kanji}: ${target.meaning_sv}. Läsningar: ${[...target.kunyomi, ...target.onyomi].join(', ')}`,
       });
     }
@@ -180,7 +226,6 @@ function generateWordOrderQuestions(count) {
   const sovPool = extraQuestions.filter((q) => q.topic === 'Ordföljd');
   const generated = [];
 
-  // Scramble templates using parsed vocabulary items
   const templates = [
     {
       sv: 'Studenten dricker vatten på biblioteket',
@@ -232,17 +277,19 @@ function generateWordOrderQuestions(count) {
   for (let i = 0; i < count; i++) {
     if (i % 2 === 0 && i / 2 < templates.length) {
       const t = templates[Math.floor(i / 2)];
+      const choices = buildFourChoices(t.correct, [t.correct], t.distractors);
       generated.push({
         id: `wo-sentence-${i}`,
         prompt: `Vilken mening har korrekt ordföljd och partiklar för:\n"${t.sv}"?`,
         correctAnswer: t.correct,
-        choices: shuffle([t.correct, ...t.distractors]),
+        validAnswers: [t.correct],
+        choices,
         explanation: `Korrekt led: Subjekt (が) + Plats för handling (で) + Objekt (を) + Verb.`,
       });
     } else {
       const q = sovPool[(i + 3) % sovPool.length];
-      const correct = q.answers[0] || '×';
-      // Create sensible distractors for SOV identification
+      const validAnswers = q.answers || ['×'];
+      const primary = validAnswers[0];
       const possibleParts = [
         'わたし',
         'ねこ',
@@ -258,17 +305,14 @@ function generateWordOrderQuestions(count) {
         '飲みます',
         'saknas / utelämnat',
       ];
-      const filteredParts = possibleParts.filter((p) => p !== correct);
-      const distractors = shuffle(filteredParts).slice(0, 3);
-      const choices = shuffle(Array.from(new Set([correct, ...distractors])));
-      while (choices.length < 4) {
-        choices.push(`Alternativ ${choices.length + 1}`);
-      }
+      const choices = buildFourChoices(primary, validAnswers, possibleParts);
+
       generated.push({
         id: `wo-sov-${q.id || i}`,
         prompt: q.prompt,
-        correctAnswer: correct,
-        choices: shuffle(choices.slice(0, 4)),
+        correctAnswer: primary,
+        validAnswers,
+        choices,
         explanation: q.explanation || '',
       });
     }
@@ -278,22 +322,43 @@ function generateWordOrderQuestions(count) {
 
 /**
  * Pure evaluation function for answering a round in a game.
- * Evaluates points (+1 for fastest correct, -1 for wrong answer), sets round winner,
- * and determines if round/match has ended.
+ * Strictly checks:
+ * 1. game.status === 'playing'
+ * 2. now >= game.roundStartTime (countdown completed)
+ * 3. now - game.roundStartTime <= ROUND_TIME_MS (not expired)
+ * 4. !game.roundWinners[roundIdx] (not already won by opponent)
+ * 5. !game.answers[roundIdx][uid] (not already answered by this player)
  */
 export function evaluateRound(game, uid, selectedAnswer, now = Date.now()) {
-  if (!game || game.status === 'finished') return game;
+  if (!game || game.status !== 'playing') return game;
+
   const roundIdx = game.currentRoundIndex || 0;
-  const currentQ = game.questions[roundIdx];
+  const currentQ = game.questions?.[roundIdx];
   if (!currentQ) return game;
 
-  const roundAnswers = { ...(game.answers?.[roundIdx] || {}) };
-  if (roundAnswers[uid]) {
-    // User already answered this round
+  // 1. Guard against submissions before round countdown ends
+  if (game.roundStartTime && now < game.roundStartTime) {
     return game;
   }
 
-  const isCorrect = String(selectedAnswer).trim() === String(currentQ.correctAnswer).trim();
+  // 2. Guard against submissions after round time has expired (> ROUND_TIME_MS)
+  if (game.roundStartTime && now - game.roundStartTime > ROUND_TIME_MS) {
+    return game;
+  }
+
+  // 3. Guard against submissions after round has already been won
+  if (game.roundWinners && game.roundWinners[roundIdx]) {
+    return game;
+  }
+
+  // 4. Guard against duplicate submission from same user in this round
+  const roundAnswers = { ...(game.answers?.[roundIdx] || {}) };
+  if (roundAnswers[uid]) {
+    return game;
+  }
+
+  const isCorrect = isAnswerCorrect(currentQ, selectedAnswer);
+
   roundAnswers[uid] = {
     answer: selectedAnswer,
     timestamp: now,
@@ -305,14 +370,10 @@ export function evaluateRound(game, uid, selectedAnswer, now = Date.now()) {
   let roundWinner = game.roundWinner || null;
 
   if (isCorrect) {
-    if (!roundWinners[roundIdx]) {
-      // First player to answer correctly wins the point!
-      roundWinners[roundIdx] = uid;
-      roundWinner = uid;
-      newScores[uid] = (newScores[uid] || 0) + 1;
-    }
+    roundWinners[roundIdx] = uid;
+    roundWinner = uid;
+    newScores[uid] = (newScores[uid] || 0) + 1;
   } else {
-    // Wrong answer gets -1 point penalty
     newScores[uid] = (newScores[uid] || 0) - 1;
   }
 
@@ -330,10 +391,8 @@ export function evaluateRound(game, uid, selectedAnswer, now = Date.now()) {
   const bothAnswered = Boolean(roundAnswers[hostUid] && roundAnswers[guestUid]);
   const hasWinner = Boolean(roundWinners[roundIdx]);
 
-  // Round ends if someone got it right, or both answered
   if (hasWinner || bothAnswered) {
     if (roundIdx >= game.questions.length - 1) {
-      // Match is finished!
       return finalizeMatch(updated, now);
     } else {
       updated.status = 'round_end';
@@ -407,29 +466,31 @@ export function finalizeMatch(game, now = Date.now()) {
 }
 
 /* =========================================================================
-   Firestore Realtime Operations
+   Firestore Realtime Operations with Atomic Cross-Collection Sync
    ========================================================================= */
 
 /**
- * Creates a new lobby document in Firestore.
+ * Creates a new lobby document in Firestore with heartbeat.
  */
 export async function createLobby(user, category) {
   if (!user || !user.uid) throw new Error('Inloggning krävs');
   const code = generateLobbyCode();
   const lobbyRef = doc(db, 'lobbies', code);
 
-  // Fetch host's current elo from leaderboard if exists
   let hostElo = DEFAULT_ELO;
   try {
     const pSnap = await getDoc(doc(db, 'leaderboard', user.uid));
     if (pSnap.exists()) hostElo = pSnap.data().elo || DEFAULT_ELO;
   } catch {}
 
+  const now = Date.now();
   const lobbyData = {
     id: code,
     category,
     status: 'waiting',
-    createdAt: Date.now(),
+    createdAt: now,
+    updatedAt: now,
+    heartbeat: now,
     host: {
       uid: user.uid,
       displayName: user.displayName || 'Spelare 1',
@@ -445,11 +506,28 @@ export async function createLobby(user, category) {
 }
 
 /**
+ * Sends a heartbeat for a lobby to keep it active in the open lobby list.
+ */
+export async function sendHeartbeat(lobbyId) {
+  if (!lobbyId) return;
+  try {
+    const lobbyRef = doc(db, 'lobbies', lobbyId);
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(lobbyRef);
+      if (snap.exists() && snap.data().status === 'waiting') {
+        tx.update(lobbyRef, { heartbeat: Date.now(), updatedAt: Date.now() });
+      }
+    });
+  } catch {}
+}
+
+/**
  * Joins an existing lobby as guest.
  */
 export async function joinLobby(lobbyId, user) {
   if (!user || !user.uid) throw new Error('Inloggning krävs');
-  const lobbyRef = doc(db, 'lobbies', lobbyId.toUpperCase().trim());
+  const cleanId = lobbyId.toUpperCase().trim();
+  const lobbyRef = doc(db, 'lobbies', cleanId);
 
   let guestElo = DEFAULT_ELO;
   try {
@@ -462,7 +540,7 @@ export async function joinLobby(lobbyId, user) {
     if (!snap.exists()) throw new Error('Lobbyn hittades inte');
     const data = snap.data();
     if (data.status !== 'waiting') throw new Error('Matchen har redan startat');
-    if (data.host.uid === user.uid) return data; // Host rejoining
+    if (data.host.uid === user.uid) return data;
     if (data.guest && data.guest.uid !== user.uid) throw new Error('Lobbyn är redan full');
 
     const guestData = {
@@ -471,35 +549,48 @@ export async function joinLobby(lobbyId, user) {
       photoURL: user.photoURL || null,
       elo: guestElo,
     };
-    tx.update(lobbyRef, { guest: guestData });
+    tx.update(lobbyRef, { guest: guestData, updatedAt: Date.now() });
     return { ...data, guest: guestData };
   });
 }
 
 /**
- * Leaves or cancels a lobby.
+ * Leaves or cancels a lobby. If in progress, triggers a forfeit.
  */
 export async function leaveLobby(lobbyId, uid) {
   if (!lobbyId || !uid) return;
   const lobbyRef = doc(db, 'lobbies', lobbyId);
   try {
-    const snap = await getDoc(lobbyRef);
-    if (!snap.exists()) return;
-    const data = snap.data();
-    if (data.host.uid === uid) {
-      await deleteDoc(lobbyRef);
-    } else if (data.guest?.uid === uid) {
-      await runTransaction(db, async (tx) => {
-        tx.update(lobbyRef, { guest: null, status: 'waiting' });
-      });
-    }
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(lobbyRef);
+      if (!snap.exists()) return;
+      const data = snap.data();
+
+      // If in progress or finished, forfeiting or exiting
+      if (data.status === 'playing' || data.status === 'round_end') {
+        // Player forfeits match
+        await applyForfeitInTransaction(tx, lobbyRef, data, uid, Date.now());
+        return;
+      }
+
+      if (data.status === 'finished') {
+        return; // Already recorded
+      }
+
+      // Waiting status: cleanup
+      if (data.host.uid === uid) {
+        tx.delete(lobbyRef);
+      } else if (data.guest?.uid === uid) {
+        tx.update(lobbyRef, { guest: null, updatedAt: Date.now() });
+      }
+    });
   } catch (err) {
     console.error('Kunde inte lämna lobby:', err);
   }
 }
 
 /**
- * Starts match by initializing 10 questions and game state.
+ * Starts match by initializing 10 questions and starting countdown.
  */
 export async function startMatch(lobbyId) {
   const lobbyRef = doc(db, 'lobbies', lobbyId);
@@ -530,15 +621,17 @@ export async function startMatch(lobbyId) {
     };
 
     tx.update(lobbyRef, {
-      status: 'in_progress',
+      status: 'playing',
       game,
+      updatedAt: now,
     });
     return game;
   });
 }
 
 /**
- * Submits an answer for a player in the current round.
+ * Submits an answer in the current round.
+ * Atomically updates round outcome and, if final question, writes leaderboard for BOTH players.
  */
 export async function submitAnswer(lobbyId, uid, roundIndex, selectedAnswer) {
   const lobbyRef = doc(db, 'lobbies', lobbyId);
@@ -546,22 +639,39 @@ export async function submitAnswer(lobbyId, uid, roundIndex, selectedAnswer) {
     const snap = await tx.get(lobbyRef);
     if (!snap.exists()) return null;
     const data = snap.data();
-    if (!data.game || data.game.currentRoundIndex !== roundIndex) return null;
+    if (!data.game) return null;
 
-    const updatedGame = evaluateRound(data.game, uid, selectedAnswer, Date.now());
+    const game = data.game;
+    const now = Date.now();
+
+    // Guard checks:
+    if (game.status !== 'playing') return null;
+    if (game.currentRoundIndex !== roundIndex) return null;
+    if (game.roundStartTime && now < game.roundStartTime) return null;
+    if (game.roundStartTime && now - game.roundStartTime > ROUND_TIME_MS) return null;
+    if (game.roundWinners?.[roundIndex]) return null;
+    if (game.answers?.[roundIndex]?.[uid]) return null;
+
+    const updatedGame = evaluateRound(game, uid, selectedAnswer, now);
     const isFinished = updatedGame.status === 'finished';
 
     tx.update(lobbyRef, {
       game: updatedGame,
-      status: isFinished ? 'finished' : data.status,
+      status: isFinished ? 'finished' : updatedGame.status,
+      updatedAt: now,
     });
+
+    // If match finished, atomically update both players' leaderboard stats!
+    if (isFinished) {
+      await updateBothLeaderboardsInTransaction(tx, lobbyId, updatedGame, now);
+    }
 
     return updatedGame;
   });
 }
 
 /**
- * Advances to next round if the pause timer has elapsed or round timed out.
+ * Advances to next round if pause timer elapsed or handles round timeout.
  */
 export async function advanceRoundIfDue(lobbyId) {
   const lobbyRef = doc(db, 'lobbies', lobbyId);
@@ -574,47 +684,102 @@ export async function advanceRoundIfDue(lobbyId) {
     const now = Date.now();
     if (data.game.status === 'round_end' && data.game.nextRoundAt && now >= data.game.nextRoundAt) {
       const nextGame = advanceToNextRound(data.game, now);
-      tx.update(lobbyRef, { game: nextGame });
+      tx.update(lobbyRef, {
+        game: nextGame,
+        status: nextGame.status,
+        updatedAt: now,
+      });
     } else if (
       data.game.status === 'playing' &&
       data.game.roundStartTime &&
       now - data.game.roundStartTime > ROUND_TIME_MS
     ) {
-      // 8-second round timeout with no correct answer: mark round as ended
       const roundIdx = data.game.currentRoundIndex;
       const updated = {
         ...data.game,
         roundWinner: data.game.roundWinners?.[roundIdx] || 'none',
       };
       if (roundIdx >= data.game.questions.length - 1) {
+        const finalGame = finalizeMatch(updated, now);
         tx.update(lobbyRef, {
-          game: finalizeMatch(updated, now),
+          game: finalGame,
           status: 'finished',
+          updatedAt: now,
         });
+        await updateBothLeaderboardsInTransaction(tx, lobbyId, finalGame, now);
       } else {
         updated.status = 'round_end';
         updated.roundEndAt = now;
         updated.nextRoundAt = now + ROUND_PAUSE_MS;
-        tx.update(lobbyRef, { game: updated });
+        tx.update(lobbyRef, {
+          game: updated,
+          status: 'round_end',
+          updatedAt: now,
+        });
       }
     }
   });
 }
 
 /**
- * Saves match outcome and updates ELO and win/loss records in the leaderboard.
+ * Handles match forfeit inside an active transaction.
  */
-export async function recordMatchLeaderboard(user, isWinner, isDraw, eloDelta) {
-  if (!user || !user.uid) return;
-  const leadRef = doc(db, 'leaderboard', user.uid);
-  return runTransaction(db, async (tx) => {
+async function applyForfeitInTransaction(tx, lobbyRef, lobbyData, forfeitingUid, now) {
+  const game = lobbyData.game;
+  const hostUid = lobbyData.host.uid;
+  const guestUid = lobbyData.guest.uid;
+  const winnerUid = forfeitingUid === hostUid ? guestUid : hostUid;
+
+  const hostElo = game?.hostElo || lobbyData.host.elo || DEFAULT_ELO;
+  const guestElo = game?.guestElo || lobbyData.guest.elo || DEFAULT_ELO;
+
+  const hostOutcome = winnerUid === hostUid ? 1 : 0;
+  const guestOutcome = winnerUid === guestUid ? 1 : 0;
+
+  const hostDiff = calculateEloChange(hostElo, guestElo, hostOutcome);
+  const guestDiff = calculateEloChange(guestElo, hostElo, guestOutcome);
+
+  const finishedGame = {
+    ...(game || {}),
+    status: 'finished',
+    winnerUid,
+    isDraw: false,
+    forfeitedBy: forfeitingUid,
+    finishedAt: now,
+    scores: game?.scores || { [hostUid]: 0, [guestUid]: 0 },
+    eloChanges: {
+      [hostUid]: hostDiff,
+      [guestUid]: guestDiff,
+    },
+  };
+
+  tx.update(lobbyRef, {
+    status: 'finished',
+    game: finishedGame,
+    updatedAt: now,
+  });
+
+  await updateBothLeaderboardsInTransaction(tx, lobbyData.id, finishedGame, now);
+}
+
+/**
+ * Atomically updates both players' leaderboard records in the transaction.
+ */
+async function updateBothLeaderboardsInTransaction(tx, matchId, game, now) {
+  const hostUid = game.hostUid;
+  const guestUid = game.guestUid;
+  const winnerUid = game.winnerUid;
+  const isDraw = game.isDraw;
+
+  for (const uid of [hostUid, guestUid]) {
+    const leadRef = doc(db, 'leaderboard', uid);
     const snap = await tx.get(leadRef);
     const existing = snap.exists()
       ? snap.data()
       : {
-          uid: user.uid,
-          displayName: user.displayName || 'Anonym',
-          photoURL: user.photoURL || null,
+          uid,
+          displayName: 'Spelare',
+          photoURL: null,
           elo: DEFAULT_ELO,
           wins: 0,
           losses: 0,
@@ -622,21 +787,25 @@ export async function recordMatchLeaderboard(user, isWinner, isDraw, eloDelta) {
           matchesPlayed: 0,
         };
 
-    const newElo = applyElo(existing.elo, eloDelta);
+    const isWinner = winnerUid === uid;
+    const isLoss = !isWinner && !isDraw;
+    const diff = game.eloChanges?.[uid] || 0;
+    const newElo = applyElo(existing.elo, diff);
+
     const updated = {
       ...existing,
-      displayName: user.displayName || existing.displayName,
-      photoURL: user.photoURL || existing.photoURL,
+      uid,
       elo: newElo,
       wins: existing.wins + (isWinner ? 1 : 0),
-      losses: existing.losses + (!isWinner && !isDraw ? 1 : 0),
+      losses: existing.losses + (isLoss ? 1 : 0),
       draws: existing.draws + (isDraw ? 1 : 0),
       matchesPlayed: (existing.matchesPlayed || 0) + 1,
-      lastPlayed: Date.now(),
+      lastMatchId: matchId,
+      lastPlayed: now,
     };
+
     tx.set(leadRef, updated);
-    return updated;
-  });
+  }
 }
 
 /**
@@ -654,16 +823,21 @@ export function subscribeToLobby(lobbyId, callback) {
 }
 
 /**
- * Subscribes to waiting lobbies in real time.
+ * Subscribes to waiting lobbies in real time, filtering out abandoned/stale lobbies.
  */
 export function subscribeToOpenLobbies(callback) {
   const q = query(collection(db, 'lobbies'), where('status', '==', 'waiting'), limit(20));
   return onSnapshot(q, (snapshot) => {
+    const now = Date.now();
     const lobbies = [];
-    snapshot.forEach((doc) => {
-      lobbies.push(doc.data());
+    snapshot.forEach((d) => {
+      const data = d.data();
+      // Filter out abandoned lobbies whose heartbeat is older than TTL
+      const isHeartbeatFresh = !data.heartbeat || now - data.heartbeat < HEARTBEAT_TTL_MS;
+      if (isHeartbeatFresh) {
+        lobbies.push(data);
+      }
     });
-    // Sort by newest first
     lobbies.sort((a, b) => b.createdAt - a.createdAt);
     callback(lobbies);
   });

@@ -444,7 +444,7 @@ function ask(text, confirmLabel = 'Fortsätt') {
 function navigate(id) {
   flush();
   if (view === 'multiplayer' && id !== 'multiplayer') {
-    resetMultiplayerView();
+    resetMultiplayerView(user?.uid);
   }
   session = null;
   view = id;
@@ -566,7 +566,7 @@ function resumeDraft(draft) {
 }
 function exit() {
   flush();
-  resetMultiplayerView();
+  resetMultiplayerView(user?.uid);
   session = null;
   view = 'home';
   render(true);

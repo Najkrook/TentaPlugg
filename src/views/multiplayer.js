@@ -8,7 +8,7 @@ import {
   startMatch,
   submitAnswer,
   advanceRoundIfDue,
-  recordMatchLeaderboard,
+  sendHeartbeat,
   subscribeToLobby,
   subscribeToOpenLobbies,
   subscribeToLeaderboard,
@@ -24,14 +24,18 @@ let lobbyUnsub = null;
 let openLobbiesUnsub = null;
 let leaderboardUnsub = null;
 let timerInterval = null;
+let heartbeatInterval = null;
 let selectedCategory = 'particles';
 let joinCodeInput = '';
 let activeTab = 'lobbies'; // 'lobbies' | 'leaderboard'
-let localAnswer = null; // { roundIndex, answer, isCorrect }
-let hasRecordedResult = false;
+let localAnswer = null;
+let hasCelebrated = false;
 let feedbackMessage = '';
 
-export function resetMultiplayerView() {
+export function resetMultiplayerView(uid = null) {
+  if (activeLobbyId && uid) {
+    leaveLobby(activeLobbyId, uid);
+  }
   if (lobbyUnsub) {
     lobbyUnsub();
     lobbyUnsub = null;
@@ -48,10 +52,14 @@ export function resetMultiplayerView() {
     clearInterval(timerInterval);
     timerInterval = null;
   }
+  if (heartbeatInterval) {
+    clearInterval(heartbeatInterval);
+    heartbeatInterval = null;
+  }
   activeLobbyId = null;
   currentLobbyData = null;
   localAnswer = null;
-  hasRecordedResult = false;
+  hasCelebrated = false;
   feedbackMessage = '';
 }
 
@@ -83,6 +91,28 @@ export function multiplayerView(ctx) {
         ctx.render?.();
       }
     }, 500);
+  }
+
+  // Heartbeat loop for keeping waiting lobby alive
+  if (activeLobbyId && currentLobbyData?.status === 'waiting' && !heartbeatInterval) {
+    heartbeatInterval = setInterval(() => {
+      if (activeLobbyId && currentLobbyData?.status === 'waiting') {
+        sendHeartbeat(activeLobbyId);
+      }
+    }, 10000);
+  } else if ((!activeLobbyId || currentLobbyData?.status !== 'waiting') && heartbeatInterval) {
+    clearInterval(heartbeatInterval);
+    heartbeatInterval = null;
+  }
+
+  // Register page unload cleanup
+  if (typeof window !== 'undefined' && !window._multiplayerUnloadRegistered) {
+    window._multiplayerUnloadRegistered = true;
+    window.addEventListener('beforeunload', () => {
+      if (activeLobbyId && user) {
+        leaveLobby(activeLobbyId, user.uid);
+      }
+    });
   }
 
   if (!user) {
@@ -671,13 +701,9 @@ function matchResultView(ctx) {
   const isDraw = game.isDraw;
   const myEloDiff = game.eloChanges?.[user.uid] || 0;
 
-  // Record to leaderboard once when viewer enters
-  if (!hasRecordedResult) {
-    hasRecordedResult = true;
-    recordMatchLeaderboard(user, isWinner, isDraw, myEloDiff);
-    if (isWinner) {
-      playAnimeSound('arigato', ctx.theme);
-    }
+  if (isWinner && !hasCelebrated) {
+    hasCelebrated = true;
+    playAnimeSound('arigato', ctx.theme);
   }
 
   return html`

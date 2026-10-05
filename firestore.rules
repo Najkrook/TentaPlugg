@@ -13,16 +13,69 @@ service cloud.firestore {
 
     match /leaderboard/{userId} {
       allow read: if true;
-      allow create, update: if request.auth != null && request.auth.uid == userId;
+      // Initial registration: default base stats (elo 1200, 0 wins/losses)
+      allow create: if request.auth != null && request.auth.uid == userId
+        && request.resource.data.elo == 1200
+        && request.resource.data.wins == 0
+        && request.resource.data.losses == 0
+        && request.resource.data.draws == 0
+        && request.resource.data.matchesPlayed == 0
+        && request.resource.data.uid == userId;
+
+      // Update: must be verified against a finished match in lobbies, or cosmetic profile update
+      allow update: if request.auth != null && (
+        (request.auth.uid == userId && isSelfProfileUpdate()) ||
+        isValidMatchLeaderboardUpdate(userId)
+      );
+    }
+
+    function isSelfProfileUpdate() {
+      return request.resource.data.elo == resource.data.elo
+        && request.resource.data.wins == resource.data.wins
+        && request.resource.data.losses == resource.data.losses
+        && request.resource.data.draws == resource.data.draws
+        && request.resource.data.matchesPlayed == resource.data.matchesPlayed;
+    }
+
+    function isValidMatchLeaderboardUpdate(userId) {
+      let matchId = request.resource.data.lastMatchId;
+      let matchData = get(/databases/$(database)/documents/lobbies/$(matchId)).data;
+      let isHost = matchData.host.uid == userId;
+      let isGuest = matchData.guest.uid == userId;
+      let oppUid = isHost ? matchData.guest.uid : matchData.host.uid;
+      let callerIsParticipant = request.auth.uid == userId || request.auth.uid == oppUid;
+      
+      let isFinished = matchData.status == 'finished';
+      let eloDiff = matchData.game.eloChanges[userId];
+      let expectedElo = (resource.data.elo + eloDiff < 100) ? 100 : resource.data.elo + eloDiff;
+      let freshMatch = resource.data.lastMatchId != matchId;
+
+      return callerIsParticipant
+        && (isHost || isGuest)
+        && isFinished
+        && request.resource.data.elo == expectedElo
+        && request.resource.data.matchesPlayed == resource.data.matchesPlayed + 1
+        && freshMatch;
     }
 
     match /lobbies/{lobbyId} {
       allow read: if request.auth != null;
       allow create: if request.auth != null
-        && request.resource.data.host.uid == request.auth.uid;
-      allow update: if request.auth != null;
+        && request.resource.data.host.uid == request.auth.uid
+        && request.resource.data.status == 'waiting';
+
+      allow update: if request.auth != null && (
+        // Host can update their lobby
+        request.auth.uid == resource.data.host.uid ||
+        // Guest can update if already in the lobby
+        (resource.data.guest != null && request.auth.uid == resource.data.guest.uid) ||
+        // A new user can join as guest if slot is open
+        (resource.data.guest == null && request.resource.data.guest.uid == request.auth.uid
+          && request.resource.data.host.uid == resource.data.host.uid)
+      );
+
       allow delete: if request.auth != null
-        && (resource.data.host.uid == request.auth.uid || resource.data.guest.uid == request.auth.uid);
+        && resource.data.host.uid == request.auth.uid;
     }
   }
 }

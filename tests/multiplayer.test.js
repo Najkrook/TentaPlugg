@@ -8,7 +8,10 @@ import {
   evaluateRound,
   advanceToNextRound,
   finalizeMatch,
+  isAnswerCorrect,
+  buildFourChoices,
   DEFAULT_ELO,
+  ROUND_TIME_MS,
 } from '../src/multiplayer.js';
 
 test('ELO rating calculations match FIDE formulas', () => {
@@ -64,10 +67,135 @@ test('Question generator produces 10 balanced questions with 4 unique choices fo
   }
 });
 
+test('P2 Fix: Valid alternative Japanese answers are accepted and never used as distractors', () => {
+  // Scenario: こうえん【　】いきませんか。 has valid answers ['に', 'へ']
+  const particleOptions = ['は', 'が', 'を', 'に', 'で', 'へ', 'と', 'も', 'から', 'まで', '×'];
+  const validAnswers = ['に', 'へ'];
+  const primary = 'に';
+
+  const choices = buildFourChoices(primary, validAnswers, particleOptions);
+  assert.equal(choices.length, 4, 'Must have exactly 4 choices');
+  assert(choices.includes('に'), 'Choices must include primary answer');
+  assert(
+    !choices.includes('へ'),
+    'Choices must NEVER include the valid alternative answer へ as a distractor',
+  );
+
+  const question = {
+    prompt: 'こうえん【　】いきませんか。',
+    correctAnswer: 'に',
+    validAnswers: ['に', 'へ'],
+    choices,
+  };
+
+  // Both に and へ must be recognized as correct!
+  assert.equal(isAnswerCorrect(question, 'に'), true, 'に must be accepted');
+  assert.equal(isAnswerCorrect(question, 'へ'), true, 'へ must be accepted');
+  assert.equal(isAnswerCorrect(question, 'で'), false, 'で is wrong');
+
+  // Verify in round evaluation that answering へ yields +1 point and NOT -1 penalty
+  const testGame = {
+    questions: [question],
+    currentRoundIndex: 0,
+    roundStartTime: 1000,
+    hostUid: 'alice',
+    guestUid: 'bob',
+    scores: { alice: 0, bob: 0 },
+    answers: {},
+    roundWinners: {},
+    status: 'playing',
+  };
+
+  const roundAfterHe = evaluateRound(testGame, 'alice', 'へ', 2000);
+  assert.equal(roundAfterHe.scores.alice, 1, 'Alice must receive +1 point for valid answer へ');
+  assert.equal(roundAfterHe.roundWinners[0], 'alice', 'Alice is marked as round winner');
+});
+
+test('P1 Fix: Late answers cannot modify closed rounds or expired rounds', () => {
+  const game = {
+    questions: [
+      {
+        id: 'q1',
+        prompt: 'Fråga 1',
+        choices: ['A', 'B', 'C', 'D'],
+        correctAnswer: 'B',
+        validAnswers: ['B'],
+      },
+      {
+        id: 'q2',
+        prompt: 'Fråga 2',
+        choices: ['A', 'B', 'C', 'D'],
+        correctAnswer: 'C',
+        validAnswers: ['C'],
+      },
+    ],
+    currentRoundIndex: 0,
+    roundStartTime: 1000, // Round starts at t=1000
+    hostUid: 'alice',
+    guestUid: 'bob',
+    scores: { alice: 0, bob: 0 },
+    answers: {},
+    roundWinners: {},
+    status: 'playing',
+  };
+
+  // 1. Premature answer during countdown (before roundStartTime) is rejected
+  const premature = evaluateRound(game, 'alice', 'B', 500);
+  assert.equal(premature.scores.alice, 0, 'No points awarded before roundStartTime');
+  assert(!premature.answers?.[0]?.alice, 'Answer not recorded before roundStartTime');
+
+  // 2. Bob answers correctly at t=2000 and wins round 0
+  const afterBobWin = evaluateRound(game, 'bob', 'B', 2000);
+  assert.equal(afterBobWin.scores.bob, 1);
+  assert.equal(afterBobWin.roundWinners[0], 'bob');
+  assert.equal(afterBobWin.status, 'round_end');
+
+  // 3. Alice submits late (wrong answer 'A') AFTER Bob already won the round
+  const aliceLateWrong = evaluateRound(afterBobWin, 'alice', 'A', 2500);
+  assert.equal(
+    aliceLateWrong.scores.alice,
+    0,
+    'Alice must NOT receive -1 penalty after round is already won',
+  );
+
+  // 4. Alice submits late (correct answer 'B') AFTER Bob already won the round
+  const aliceLateCorrect = evaluateRound(afterBobWin, 'alice', 'B', 2500);
+  assert.equal(
+    aliceLateCorrect.scores.alice,
+    0,
+    'Alice must NOT receive +1 point after round is already won',
+  );
+
+  // 5. Test round timeout (> ROUND_TIME_MS)
+  const freshGame = {
+    questions: [
+      {
+        id: 'q1',
+        prompt: 'Fråga 1',
+        choices: ['A', 'B', 'C', 'D'],
+        correctAnswer: 'B',
+        validAnswers: ['B'],
+      },
+    ],
+    currentRoundIndex: 0,
+    roundStartTime: 1000,
+    hostUid: 'alice',
+    guestUid: 'bob',
+    scores: { alice: 0, bob: 0 },
+    answers: {},
+    roundWinners: {},
+    status: 'playing',
+  };
+
+  // Submitting at t=10000 (elapsed = 9000ms > 8000ms timeout)
+  const timedOutSubmit = evaluateRound(freshGame, 'alice', 'B', 10000);
+  assert.equal(timedOutSubmit.scores.alice, 0, 'Submission after 8s timeout must NOT award points');
+  assert(!timedOutSubmit.answers?.[0]?.alice, 'Timed out submission must not be recorded');
+});
+
 test('Vocab category draws from parsed Genki vocabulary dataset', () => {
   const vocabQuestions = generateQuestionsForCategory('vocab', 10);
   assert.equal(vocabQuestions.length, 10);
-  // Verify prompts contain Japanese/Swedish questions
   const hasSwedishPrompt = vocabQuestions.some(
     (q) => q.prompt.includes('Vad heter') || q.prompt.includes('Vad betyder'),
   );
@@ -80,10 +208,23 @@ test('Vocab category draws from parsed Genki vocabulary dataset', () => {
 test('Round evaluation: fastest correct answer receives +1 point, wrong answer receives -1 point', () => {
   const mockGame = {
     questions: [
-      { id: 'q1', prompt: 'Fråga 1', choices: ['A', 'B', 'C', 'D'], correctAnswer: 'B' },
-      { id: 'q2', prompt: 'Fråga 2', choices: ['A', 'B', 'C', 'D'], correctAnswer: 'C' },
+      {
+        id: 'q1',
+        prompt: 'Fråga 1',
+        choices: ['A', 'B', 'C', 'D'],
+        correctAnswer: 'B',
+        validAnswers: ['B'],
+      },
+      {
+        id: 'q2',
+        prompt: 'Fråga 2',
+        choices: ['A', 'B', 'C', 'D'],
+        correctAnswer: 'C',
+        validAnswers: ['C'],
+      },
     ],
     currentRoundIndex: 0,
+    roundStartTime: 1000,
     hostUid: 'alice',
     guestUid: 'bob',
     hostElo: 1200,
@@ -95,7 +236,7 @@ test('Round evaluation: fastest correct answer receives +1 point, wrong answer r
   };
 
   // Alice answers wrong first ('A')
-  const afterAliceWrong = evaluateRound(mockGame, 'alice', 'A', 1000);
+  const afterAliceWrong = evaluateRound(mockGame, 'alice', 'A', 2000);
   assert.equal(
     afterAliceWrong.scores.alice,
     -1,
@@ -105,23 +246,23 @@ test('Round evaluation: fastest correct answer receives +1 point, wrong answer r
   assert.equal(afterAliceWrong.status, 'playing', 'Round still active since no one answered right');
 
   // Bob answers right ('B')
-  const afterBobCorrect = evaluateRound(afterAliceWrong, 'bob', 'B', 1500);
+  const afterBobCorrect = evaluateRound(afterAliceWrong, 'bob', 'B', 3000);
   assert.equal(afterBobCorrect.scores.bob, 1, 'Bob receives +1 point for correct answer');
   assert.equal(afterBobCorrect.roundWinners[0], 'bob', 'Bob is marked as round winner');
   assert.equal(afterBobCorrect.status, 'round_end', 'Round ends when someone gets it right');
 
   // Alice cannot answer again in this round
-  const aliceRetry = evaluateRound(afterBobCorrect, 'alice', 'B', 2000);
+  const aliceRetry = evaluateRound(afterBobCorrect, 'alice', 'B', 3500);
   assert.equal(aliceRetry.scores.alice, -1, 'Alice score should not change on duplicate submit');
 
   // Advance to next round
-  const round2 = advanceToNextRound(afterBobCorrect, 3000);
+  const round2 = advanceToNextRound(afterBobCorrect, 4000);
   assert.equal(round2.currentRoundIndex, 1);
   assert.equal(round2.status, 'playing');
   assert.equal(round2.roundWinner, null);
 
   // Round 2 is last round: Bob gets it right again ('C')
-  const finalGame = evaluateRound(round2, 'bob', 'C', 4000);
+  const finalGame = evaluateRound(round2, 'bob', 'C', 5000);
   assert.equal(finalGame.status, 'finished', 'Match finishes on final question');
   assert.equal(finalGame.winnerUid, 'bob', 'Bob wins the match');
   assert.equal(finalGame.scores.bob, 2);
@@ -132,8 +273,17 @@ test('Round evaluation: fastest correct answer receives +1 point, wrong answer r
 
 test('Match finalization properly handles draws with equal scores', () => {
   const tiedGame = {
-    questions: [{ id: 'q1', prompt: 'Fråga 1', choices: ['A', 'B', 'C', 'D'], correctAnswer: 'A' }],
+    questions: [
+      {
+        id: 'q1',
+        prompt: 'Fråga 1',
+        choices: ['A', 'B', 'C', 'D'],
+        correctAnswer: 'A',
+        validAnswers: ['A'],
+      },
+    ],
     currentRoundIndex: 0,
+    roundStartTime: 1000,
     hostUid: 'alice',
     guestUid: 'bob',
     hostElo: 1200,
