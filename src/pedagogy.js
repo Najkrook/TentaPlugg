@@ -1,3 +1,4 @@
+import { selfAssessmentCriteria, selfAssessmentGuide } from './self-assessment.js';
 // Teaching content stays separate from grading: hints must never decide correctness.
 export const wordClasses = {
   Noun: 'Substantiv namnger exempelvis en sak, person eller företeelse.',
@@ -280,6 +281,8 @@ export function enrichQuestion(q) {
       'Stämmer innehållet med modellösningen? Annan korrekt formulering går bra; välj Behöver öva mer om en viktig del saknas.',
     ];
     if (specificChecklists[q.id]) q.checklist = [...specificChecklists[q.id], q.checklist.at(-1)];
+    q.checklist = selfAssessmentCriteria(q, q.checklist);
+    q.guideId = selfAssessmentGuide(q);
   }
   // Keep speech and other consumers of model in sync with the displayed explanation.
   if (q.model && !q.self) q.model = q.explanation;

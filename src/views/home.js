@@ -2,6 +2,7 @@ import { html } from 'lit-html';
 import { questions, topics } from '../data.js';
 import { daysUntil } from '../engine.js';
 import { icon, dateText } from './shared.js';
+import { playAnimeSound } from '../audio.js';
 export function homeView(ctx) {
   const { state, now, plan } = ctx,
     p = ctx.progress(),
@@ -100,12 +101,27 @@ export function homeView(ctx) {
       </div>
       ${
         ctx.theme === 'sakura'
-          ? html`<div class="anime-figure anime-study-panel" aria-hidden="true">
-              <img
-                src="/anime/study.jpg"
-                alt="Sakura-maskot som studerar japanska"
-                loading="lazy"
-              />
+          ? html`<div class="anime-figure anime-study-panel">
+              <div class="anime-mascot-wrapper">
+                <div class="kawaii-speech-bubble focus-bubble">
+                  <span>先輩、今日もいっしょにがんばろう！✨</span>
+                  <small>Kämpa på, senpai! 💕</small>
+                </div>
+                <button
+                  type="button"
+                  class="anime-study-avatar-btn"
+                  title="Klicka på mig! ✨ (Arigato~)"
+                  aria-label="Klicka på anime-maskoten för att spela Arigato"
+                  @click=${() => playAnimeSound('arigato', ctx.theme)}
+                >
+                  <img
+                    src="/anime/study.jpg"
+                    alt="Sakura-maskot som studerar japanska"
+                    loading="lazy"
+                  />
+                  <span class="anime-badge-stamp">💮 合格祈願</span>
+                </button>
+              </div>
             </div>`
           : html`<div class="particle-art" aria-hidden="true" lang="ja">
               <div class="glyph small">を</div>

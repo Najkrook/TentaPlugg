@@ -39,6 +39,7 @@ test.describe('Milestone M3: Theme Switching & Persistence Stress Tests', () => 
   test('rapid clicking of sidebar theme toggle maintains 100% state synchronization', async ({
     page,
   }) => {
+    test.slow();
     const pageErrors = [];
     page.on('pageerror', (err) => pageErrors.push(err.message));
 

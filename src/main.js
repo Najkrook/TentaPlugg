@@ -15,6 +15,7 @@ import {
   importGuest as mergeGuest,
 } from './engine.js';
 import { createSession, submitSession, updateResult } from './session.js';
+import { createFollowUp } from './follow-up.js';
 import {
   questionForSession,
   initialParticleState,
@@ -31,6 +32,7 @@ import { progressView } from './views/progress.js';
 import { guideView, guideModalTemplate, resolveGuideId } from './views/guide.js';
 import { sessionView } from './views/session.js';
 import { icon, dateText } from './views/shared.js';
+import { playAnimeSound, isSoundMuted, toggleSoundMuted } from './audio.js';
 const app = document.querySelector('#app');
 let user = null,
   state = fresh(),
@@ -76,6 +78,13 @@ function applyTheme(t) {
 function toggleTheme() {
   const next = state.theme === 'sakura' ? 'classic' : 'sakura';
   setTheme(next);
+  if (next === 'sakura') {
+    playAnimeSound('tuturu', 'sakura');
+  }
+}
+function toggleMute() {
+  toggleSoundMuted();
+  render();
 }
 function setTheme(next) {
   applyTheme(next);
@@ -196,6 +205,7 @@ function getCtx() {
     startTask,
     startExam,
     startErrors,
+    startFollowUp,
     openAttempt,
     resumeDraft,
     navigate,
@@ -258,9 +268,11 @@ function render(focus = false) {
             type="button"
             class="theme-toggle sidebar-theme-toggle"
             @click=${toggleTheme}
-            aria-label=${state.theme === 'sakura' ? 'Växla till klassiskt tema' : 'Växla till Sakura Anime-tema'}
+            title=${state.theme === 'sakura' ? 'Växla till klassiskt tema' : 'Kawaii-ify'}
+            aria-label=${state.theme === 'sakura' ? 'Växla till klassiskt tema' : 'Kawaii-ify'}
           >
-            ${state.theme === 'sakura' ? html`🎓 Klassiskt tema` : html`🌸 Sakura Anime`}
+            <span class="theme-icon" aria-hidden="true">${state.theme === 'sakura' ? '🎓' : '🌸'}</span>
+            <span class="theme-label">${state.theme === 'sakura' ? 'Klassisk' : 'Kawaii-ify'}</span>
           </button>
           <div class="exam-note">
             ${icon('CalendarDays')}<span
@@ -276,15 +288,27 @@ function render(focus = false) {
           <span class="breadcrumb">Japanska för nybörjare <span>/</span> GEMA70</span
           ><span class="mobile-brand"><span lang="ja">学</span><b>TentaPlugg</b></span>
           <div class="topbar-actions">
+            ${state.theme === 'sakura'
+              ? html`<button
+                  type="button"
+                  class="theme-toggle sound-toggle"
+                  @click=${toggleMute}
+                  title=${isSoundMuted() ? 'Slå på anime-ljud' : 'Stäng av anime-ljud'}
+                  aria-label=${isSoundMuted() ? 'Slå på anime-ljud' : 'Stäng av anime-ljud'}
+                >
+                  <span class="theme-icon" aria-hidden="true">${isSoundMuted() ? '🔇' : '🔊'}</span>
+                  <span class="sound-label">${isSoundMuted() ? 'Tyst' : 'Ljud'}</span>
+                </button>`
+              : ''}
             <button
-              class="topbar-theme-toggle"
+              type="button"
+              class="theme-toggle topbar-theme-toggle"
               @click=${() => toggleTheme()}
-              title="Växla tema (🌸 Sakura / 🎓 Klassisk)"
-              aria-label="Växla tema"
+              title=${state.theme === 'sakura' ? 'Växla till klassiskt tema' : 'Kawaii-ify'}
+              aria-label=${state.theme === 'sakura' ? 'Växla till klassiskt tema' : 'Kawaii-ify'}
             >
-              <span class="theme-icon" aria-hidden="true"
-                >${state.theme === 'sakura' ? '🌸' : '🎓'}</span
-              ><span class="theme-label">${state.theme === 'sakura' ? 'Sakura' : 'Klassisk'}</span>
+              <span class="theme-icon" aria-hidden="true">${state.theme === 'sakura' ? '🎓' : '🌸'}</span>
+              <span class="theme-label">${state.theme === 'sakura' ? 'Klassisk' : 'Kawaii-ify'}</span>
             </button>
             <button class="account" id="account" ?disabled=${authBusy} @click=${account}>
               ${icon(user ? 'LogOut' : 'LogIn')}<span
@@ -499,6 +523,15 @@ function startErrors(exam) {
   persist(true);
   render(true);
 }
+function startFollowUp() {
+  if (!session?.done) return;
+  const followUp = createFollowUp(session, questions);
+  if (!followUp) return;
+  flush();
+  session = followUp;
+  persist(true);
+  render(true);
+}
 function openAttempt(attempt) {
   flush();
   session = structuredClone(attempt);
@@ -548,6 +581,11 @@ function grade(okOrRating, advance = false) {
   if (advance) next();
   else {
     const isOk = typeof okOrRating === 'boolean' ? okOrRating : okOrRating !== 'again';
+    if (isOk) {
+      playAnimeSound('wow', state.theme);
+    } else {
+      playAnimeSound('nani', state.theme);
+    }
     announce(
       q.type === 'particle-edit'
         ? 'Båda stegen är rättade. Resultatet visas.'
@@ -618,6 +656,7 @@ async function next() {
   }
   submitSession(state, session, questions, Date.now());
   persist(true);
+  playAnimeSound('tuturu', state.theme);
   render(true);
 }
 function review(index, selfOnly = false) {

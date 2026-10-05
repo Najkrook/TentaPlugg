@@ -1,6 +1,6 @@
 # TentaPlugg · Japanska
 
-Mobilanpassad studieapp för GEMA70/JAPC11, publicerad på https://tentaplugg-japanska-2026.web.app.
+Mobilanpassad studieapp för GEMA70/JAPC11, publicerad på https://japc11-tentaplugg.web.app.
 
 ## Kör lokalt
 
@@ -24,6 +24,12 @@ Om Windows-sandlådan blockerar testprocesser: `node --test --test-isolation=non
 - Automatisk rättning av entydiga svar; självrättning för resonemang, fria meningar och terminologiskt tvetydiga frågor.
 - Varje tenta summerar till 100 övningspoäng. Läsprovets II.1 har tilldelats 10 poäng för att summera till 100; poäng står inte utsatta där i originalet. Självbedömning ger allt eller inget per delfråga och reproducerar inte en lärares partiella poängsättning.
 - Tentans modellösningar är inte officiella facit. Exempel på klassificeringen av kopulan och demonstrativer anges med förbehåll. Originalets formuleringar/romaniseringskonventioner kan skilja sig från andra läroböcker.
+
+## Självrättning och nästa steg
+
+Fritextfrågorna visar frågespecifika bedömningspunkter efter att modellösningen öppnats, samt en relevant snabbguide i en dialog som bevarar svaret. Punkterna bygger på befintliga modellösningar och ger inte automatiskt poäng.
+
+Efter ett avslutat pass eller en inlämnad tenta föreslår resultatsidan ett nytt pass med högst fem frågor som bedömts som fel eller ”Behöver öva mer”. Svar som väntar på självbedömning ingår inte. Uppföljningen börjar med tomma svar och ett eget försöks-ID; ursprungsresultatet bevaras. Kriterier och guidemappning finns i `src/self-assessment.js`, urvalet i `src/follow-up.js`.
 
 ## Firebase och kostnader
 

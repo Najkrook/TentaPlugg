@@ -17,6 +17,16 @@ export function progressView(ctx) {
           </section>`
         : ''
     }
+    ${ctx.theme === 'sakura'
+      ? html`<div class="anime-figure progress-anime-hero-card" aria-hidden="true">
+          <img src="/anime/mascot_cheer.jpg" alt="Mascot cheer" loading="lazy" />
+          <div class="progress-anime-copy">
+            <span class="progress-rank-badge">✨ KAWAII ANIME RANK: ${p.done >= 30 ? '👑 S-RANK MÄSTARE' : p.done > 0 ? '🌸 A-RANK LÄRLING' : '🐣 ROOKIE SENPAI'} ✨</span>
+            <h3>Varje partikel räknas! ٩(ˊᗜˋ*)و</h3>
+            <p>努力は裏切らないよ！ Dina framsteg blommar som vackra körsbärsblommor! 🌸💕</p>
+          </div>
+        </div>`
+      : ''}
     <section class="progress-top">
       <div class="score-circle">
         <strong>${p.done ? Math.round((p.ok / p.done) * 100) : 0}%</strong><span>rätt senast</span>

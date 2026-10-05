@@ -4,6 +4,16 @@ import { latestAttempt, scoreAttempt, examErrors } from '../engine.js';
 import { heading, icon } from './shared.js';
 export function examsView(ctx) {
   return html`${heading('FRÅN KURSMATERIALET', 'Gamla tentor', 'Alla uppgifter, med originalbilder och sparade svar.')}
+    ${ctx.theme === 'sakura'
+      ? html`<div class="anime-figure exam-anime-banner-card" aria-hidden="true">
+          <img src="/anime/mascot_cheer.jpg" alt="Mascot cheer" loading="lazy" />
+          <div class="exam-anime-copy">
+            <span class="exam-anime-omamori">🌸 絶対合格祈願 · ZETTAI GOUKAKU 🌸</span>
+            <h3>Senpai krossar tentan! (ง •̀_•́)ง✨</h3>
+            <p>Alla gamla tentor på ett ställe. Ta en tenta i taget så sitter allt! 💮💕</p>
+          </div>
+        </div>`
+      : ''}
     <div class="notice">
       ${icon('CircleHelp')}
       <p>

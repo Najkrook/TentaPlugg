@@ -769,6 +769,31 @@ eq(
 examQuestions.forEach((q) => questions.push({ ...q, explanation: q.model }));
 export const guides = [
   {
+    id: 'writing-systems',
+    title: 'Skriftsystem och kanjiläsningar',
+    text: 'Hiragana och katakana återger huvudsakligen moror. Hiragana används bland annat för partiklar och böjningsändelser; katakana för lånord som コーヒー. Kanji representerar betydelsebärande enheter. Alla kanji är inte bildtecken. On-yomi har kinesiskt ursprung och kun-yomi är japanska läsningar: 山 läses やま ensamt och サン i 富士山（ふじさん）. I tabeller: kontrollera varje efterfrågad del, tecken, läsning och betydelse, separat.',
+  },
+  {
+    id: 'word-origins',
+    title: 'Ordens ursprung',
+    text: 'Wago är inhemska japanska ord, som やま. Kango är sinojapanska ord, som 学校. Gairaigo är andra lånord, som コーヒー. Konshugo har blandat ursprung, som 消しゴム. Skilj dessa ursprungskategorier från ordklasser som verb och substantiv.',
+  },
+  {
+    id: 'sentence-parts',
+    title: 'Fraser, predikat och argument',
+    text: 'En mening kan bestå av flera satser. En fras fungerar som en enhet; ta med bestämningar som hör till huvudordet. I わたしが本を読みます är 読みます predikat, わたし och 本 argument, och 本を en postpositionsfras. Skilj dessa från tillägg för tid och plats. Subjektet kan vara utelämnat och alla meningar har inte objekt. は kan markera ett tidstema; det är inte automatiskt den som utför handlingen. Frasgränser och kopulans klassificering kan bero på kursens analys.',
+  },
+  {
+    id: 'word-classes',
+    title: 'Ordklasser och kopula',
+    text: 'Substantiv namnger, verb uttrycker handling eller tillstånd, och adjektiv beskriver egenskaper. Partiklar visar relationer i meningen. です är kopula; tentans begränsade alternativ kan behandla den under Verb. Dåtid är でした: きのうは木曜日でした (igår var det torsdag). あの framför substantiv är ett demonstrativt bestämningsord, även om Pronoun ligger närmast bland tentans alternativ. Kontrollera kursens terminologi.',
+  },
+  {
+    id: 'reading-strategy',
+    title: 'Läs frågan och hitta stödet',
+    text: 'Dela upp frågan: vem, var, när och vad? Leta upp stöd för varje del i brevet eller bilden. Skilj månad från datum och ankomst från återresa. Kontrollera om svaret ska vara på svenska, japanska eller enbart hiragana. Vid en bildbeskrivning ska innehållet följa originalbilden; modellsvaret visar en möjlig formulering.',
+  },
+  {
     id: 'wa-ga',
     title: 'は eller が?',
     text: 'は sätter ämnet: わたしは学生です。が markerar subjekt, ofta ny information: だれが来ますか。Vid 好き、嫌い、わかる markeras det man gillar, ogillar eller förstår ofta med が.',

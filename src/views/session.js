@@ -7,6 +7,7 @@ import { promptSpeech, answerSpeech, japaneseText } from '../speech.js';
 import { icon, languageText, speechButton } from './shared.js';
 import { questionForSession } from '../particles.js';
 import { particleSessionView } from './particles.js';
+import { followUpQuestions } from '../follow-up.js';
 
 export function formatInterval(ms) {
   if (ms <= 0) return 'Nu';
@@ -122,9 +123,14 @@ export function sessionView(ctx) {
                         class="anime-figure anime-feedback-mascot ${s.grades[q.id] ? 'good' : 'again'}"
                         aria-hidden="true"
                       >
+                        <div class="anime-feedback-bubble">
+                          ${s.grades[q.id]
+                            ? html`<span class="bubble-jp">すごい！完璧〜！💮</span><small>Senpai, du är bäst! ✨</small>`
+                            : html`<span class="bubble-jp">うわあああ〜！(╥﹏╥)</span><small>Kämpa på, senpai! 💕</small>`}
+                        </div>
                         <img
-                          src="${s.grades[q.id] ? '/anime/cheer.jpg' : '/anime/encourage.jpg'}"
-                          alt="${s.grades[q.id] ? 'やった！ Bra jobbat!' : 'がんばって！ Kämpa vidare!'}"
+                          src="${s.grades[q.id] ? '/anime/cheer.jpg' : '/anime/mascot_cry.jpg'}"
+                          alt="${s.grades[q.id] ? 'やった！ Bra jobbat!' : 'うわあああ〜！ Kämpa vidare!'}"
                           loading="lazy"
                         />
                       </div>`
@@ -151,6 +157,7 @@ export function sessionView(ctx) {
                         <ul>
                           ${q.checklist?.map((item) => html`<li>${languageText(item)}</li>`)}
                         </ul>
+                        ${q.guideId ? html`<button type="button" class="text-button" @click=${(e) => ctx.openGuideModal(q.guideId, e.currentTarget)}>${icon('BookOpen')} Öppna snabbguide</button>` : ''}
                       </div>`
                     : isIncorrect
                       ? html`<p class="learning-tip">
@@ -299,12 +306,23 @@ function contrastiveCallout(contrastive, userVal, q, ctx) {
 }
 function resultView(ctx) {
   const s = ctx.session,
-    result = scoreAttempt(s, questions);
+    result = scoreAttempt(s, questions),
+    followUpIds = followUpQuestions(s, questions),
+    followUpTopics = [
+      ...new Set(followUpIds.map((id) => questions.find((q) => q.id === id).topic)),
+    ];
   return html`<section class="result-panel">
     ${
       ctx.theme === 'sakura'
         ? html`<div class="anime-figure anime-result-mascot" aria-hidden="true">
-            <img src="/anime/cheer.jpg" alt="やった！ Bra jobbat!" loading="lazy" />
+            <div class="anime-result-wrapper">
+              <img class="result-mascot-img" src="/anime/cheer.jpg" alt="やった！ Bra jobbat!" loading="lazy" />
+              <img class="result-stamp-img" src="/anime/stamp_sakura.jpg" alt="たいへんよくできました" loading="lazy" />
+              <div class="kawaii-speech-bubble result-bubble">
+                <span>先輩、本当にお疲れ様でした〜！💮✨</span>
+                <small>Helt fantastiskt kämpat! 💕 ( ๑>ᴗ<๑ )</small>
+              </div>
+            </div>
           </div>`
         : html`<span class="result-icon">${icon('CircleCheck')}</span>`
     }
@@ -329,6 +347,25 @@ function resultView(ctx) {
         Gå igenom svaren</button
       ><button class="primary" @click=${ctx.exit}>Till studierummet</button>
     </div>
+    ${
+      followUpIds.length
+        ? html`<section class="follow-up" aria-labelledby="follow-up-heading">
+            <h2 id="follow-up-heading">Ditt nästa steg</h2>
+            <p>
+              Öva igen på ${followUpIds.length} ${followUpIds.length === 1 ? 'fråga' : 'frågor'} som
+              du behövde hjälp med i det här passet.
+            </p>
+            <p class="muted">${followUpTopics.join(' · ')}</p>
+            ${result.pending ? html`<p>Fler svar väntar på självbedömning. De ingår först om du markerar att du behöver öva mer.</p>` : ''}
+            <button class="primary" @click=${ctx.startFollowUp}>
+              Starta kort övningspass ${icon('ChevronRight')}
+            </button>
+            <p class="input-hint">
+              Ett nytt pass med tomma svar. Det tidigare resultatet finns kvar.
+            </p>
+          </section>`
+        : ''
+    }
     <div class="result-summary">
       ${s.ids.map((id, i) => {
         const q = questionForSession(

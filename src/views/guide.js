@@ -48,7 +48,7 @@ export const guideCards = (ctx, { highlightId } = {}) => html`
           tabindex=${isTarget ? '-1' : '0'}
         >
           <a id=${`guide-${g.id}`} class="sr-only"></a>
-          <span class="guide-index">0${i + 1}</span>
+          <span class="guide-index">${String(i + 1).padStart(2, '0')}</span>
           ${isTarget ? html`<span class="guide-badge">Relevant för ditt svar</span>` : ''}
           <h2>${g.title}</h2>
           <p>${languageText(g.text)}</p>
@@ -69,7 +69,9 @@ export const guideModalTemplate = (ctx, { guideId, onClose }) => {
       <header class="guide-modal-header">
         <div>
           <span class="overline">SNABBGUIDE</span>
-          <h2 id="guide-modal-title">Grammatik & partiklar</h2>
+          <h2 id="guide-modal-title">
+            ${guides.find((g) => g.id === activeId)?.title || 'Regler och exempel'}
+          </h2>
         </div>
         <button
           type="button"
@@ -95,6 +97,20 @@ export const guideModalTemplate = (ctx, { guideId, onClose }) => {
  */
 export const guideView = (ctx) => html`
   ${heading('NÄR DU BEHÖVER EN LEDTRÅD', 'Snabbguide', 'Reglerna du oftast behöver på tentorna.')}
+  ${ctx.theme === 'sakura'
+    ? html`<div class="anime-figure guide-anime-hero-card" aria-hidden="true">
+        <div class="guide-anime-peek-wrap">
+          <img src="/anime/mascot_peek.jpg" alt="Chibi catgirl maskot" loading="lazy" />
+        </div>
+        <div class="guide-anime-content">
+          <div class="guide-anime-bubble">
+            <strong>先輩、困ったらここを見てね！♡</strong>
+            <p>Ta det lugnt, senpai! Grammatiken sitter snart! ( ๑>ᴗ<๑ )و ✨</p>
+          </div>
+          <span class="guide-anime-tag">🌸 KAWAII SENSEI HINTS 🌸</span>
+        </div>
+      </div>`
+    : ''}
   ${guideCards(ctx)}
   <section class="section-block">
     <h2>Repetition med mellanrum</h2>

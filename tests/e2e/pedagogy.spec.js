@@ -108,3 +108,71 @@ test('an unanswered exam item is explained without inventing a mistake', async (
   await expect(page.locator('.feedback')).toContainText('transportmedel');
   await expect(page.locator('.contrastive-callout')).toHaveCount(0);
 });
+
+test('self-assessment guide preserves the answer and follow-up leaves the original result intact', async ({
+  page,
+}, testInfo) => {
+  const errors = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  page.on('console', (msg) => {
+    if (msg.type() === 'error') errors.push(msg.text());
+  });
+  await openSession(page, ['reading-II.2-4']);
+  const input = page.getByLabel('Ditt svar', { exact: true });
+  await input.fill('はい、だいがくにあります。');
+  await page.getByRole('button', { name: 'Visa modellösning', exact: true }).click();
+  await expect(page.locator('.self-checklist')).toContainText('framför universitetet');
+  const guide = page.getByRole('button', { name: 'Öppna snabbguide', exact: true });
+  await guide.click();
+  await expect(page.locator('dialog[open] #reading-strategy')).toHaveClass(/guide-highlight/);
+  await page.getByRole('button', { name: 'Återgå till övningen', exact: true }).click();
+  await expect(guide).toBeFocused();
+  await expect(input).toHaveValue('はい、だいがくにあります。');
+  const directory = process.env.PEDAGOGY_SCREENSHOTS || join(tmpdir(), 'tentaplugg-pedagogy');
+  await mkdir(directory, { recursive: true });
+  await expect(page.locator('#toast')).toHaveCount(0, { timeout: 10000 });
+  await page
+    .locator('.self-checklist')
+    .screenshot({ path: join(directory, `criteria-${testInfo.project.name}.png`) });
+  await page.getByRole('button', { name: 'Behöver öva mer', exact: true }).click();
+  await expect(page.locator('.follow-up')).toContainText('1 fråga');
+  await expect(page.locator('.follow-up')).toContainText('Läsförståelse');
+  await page.screenshot({
+    path: join(directory, `follow-up-${testInfo.project.name}.png`),
+    fullPage: true,
+  });
+  const original = await page.evaluate(
+    () => Object.values(JSON.parse(localStorage.getItem('tentaplugg-v1-guest')).attempts)[0],
+  );
+  await page.getByRole('button', { name: 'Starta kort övningspass', exact: true }).click();
+  await expect(input).toHaveValue('');
+  await expect(page.locator('.feedback')).toHaveCount(0);
+  await input.fill('いいえ、めいじだいがくのまえにあります。');
+  await page.getByRole('button', { name: 'Visa modellösning', exact: true }).click();
+  await page.getByRole('button', { name: 'Jag kunde detta', exact: true }).click();
+  await expect(page.locator('.result-number')).toHaveText('1 / 1');
+  await expect(page.locator('.follow-up')).toHaveCount(0);
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('tentaplugg-v1-guest')));
+  expect(saved.attempts[original.attemptId]).toEqual(original);
+  expect(
+    Object.values(saved.attempts).find((a) => a.sourceAttemptId === original.attemptId)?.grades[
+      'reading-II.2-4'
+    ],
+  ).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test('pending self-assessments are not included in the suggested mistake practice', async ({
+  page,
+}) => {
+  await openSession(page, ['gema70-3-7', 'japc11-1.1'], { mode: 'exam', exam: 'gema70' });
+  await page.getByRole('button', { name: 'Nästa fråga', exact: true }).click();
+  await page.getByRole('button', { name: 'Lämna in tentan', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Lämna in', exact: true }).click();
+  await expect(page.locator('.follow-up')).toContainText('1 fråga');
+  await expect(page.locator('.follow-up')).toContainText('Fler svar väntar på självbedömning');
+  await page.getByRole('button', { name: 'Starta kort övningspass', exact: true }).click();
+  await expect(page.locator('.session-top')).toContainText('1 / 1');
+  await expect(page.locator('.question-title')).toContainText('しんかんせん');
+});
