@@ -4,8 +4,10 @@ export default defineConfig({
   fullyParallel: true,
   workers: process.env.CI ? 2 : 3,
   retries: process.env.CI ? 1 : 0,
-  reporter: 'list',
-  use: { baseURL: 'http://127.0.0.1:5175', trace: 'retain-on-failure' },
+  use: {
+    baseURL: 'http://127.0.0.1:5175',
+    trace: process.env.CI ? 'retain-on-failure' : 'off',
+  },
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
     { name: 'webkit-mobile', use: { ...devices['iPhone 13'], defaultBrowserType: 'webkit' } },

@@ -1,5 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { questions } from '../../src/data.js';
+import { fresh } from '../../src/engine.js';
+import { createSession } from '../../src/session.js';
 
 async function checkCurrentAnswer(page) {
   if (await page.locator('.particle-panel').count()) {
@@ -395,81 +397,65 @@ test.describe('Quick Guide Modal Empirical Stress Suite', () => {
   test('Contrastive callout in session renders BookOpen icon and opens corresponding guide card', async ({
     page,
   }) => {
+    const state = fresh();
+    state.drafts.practice = {
+      at: Date.now(),
+      session: createSession(['l5-2'], 'Pedagogikkontroll'),
+    };
+    await page.addInitScript((state) => {
+      localStorage.setItem('tentaplugg-v1-guest', JSON.stringify(state));
+    }, state);
     await page.goto('/');
 
-    // Start particle practice
-    await page.getByRole('button', { name: /Träna partiklar/ }).click();
+    // Resume the draft from Progress view
+    await page
+      .getByRole('button', { name: /^(Mina framsteg|Framsteg)$/ })
+      .filter({ visible: true })
+      .click();
+    await page
+      .locator('.history-row')
+      .filter({ hasText: 'Pedagogikkontroll' })
+      .getByRole('button', { name: 'Fortsätt', exact: true })
+      .click();
     await expect(page.locator('.question-panel')).toBeVisible();
 
-    // Iterate through questions until we trigger contrastive feedback with guideId
-    let foundContrastive = false;
-    for (let i = 0; i < 10; i++) {
-      // Try to choose 'に' if choices exist, or type 'に'
-      const choices = page.locator('.choice');
-      if (await choices.count()) {
-        const niBtn = choices.filter({ hasText: /^に$/ });
-        if (await niBtn.count()) {
-          await niBtn.first().click();
-        } else {
-          await choices.first().click();
-        }
-      } else if (await page.locator('#answer').count()) {
-        await page.locator('#answer').fill('に');
-      }
+    // Select distractor 'に' (correct answer is 'で')
+    const niBtn = page.locator('.choice').filter({ hasText: /^に$/ });
+    await expect(niBtn).toBeVisible();
+    await niBtn.click();
+    await checkCurrentAnswer(page);
 
-      await checkCurrentAnswer(page);
+    // Check if contrastive callout appeared
+    const callout = page.locator('.contrastive-callout');
+    await expect(callout).toBeVisible();
+    await expect(callout).toBeVisible();
+    const openGuideBtn = callout.locator('.contrastive-guide-btn');
+    await expect(openGuideBtn).toBeVisible();
+    // Verify contrastive chip contents
+    await expect(callout).toContainText('Ditt val:');
+    await expect(callout).toContainText('Godtagna svar:');
 
-      // Check if contrastive callout appeared
-      const callout = page.locator('.contrastive-callout');
-      if (await callout.isVisible()) {
-        const openGuideBtn = callout.locator('.contrastive-guide-btn');
-        if (await openGuideBtn.isVisible()) {
-          foundContrastive = true;
+    // Verify BookOpen SVG icon inside button
+    await expect(openGuideBtn.locator('svg')).toBeVisible();
+    await expect(openGuideBtn).toContainText('Öppna snabbguide');
 
-          // Verify contrastive chip contents
-          await expect(callout).toContainText('Ditt val:');
-          await expect(callout).toContainText('Godtagna svar:');
+    // Click button to open modal
+    await openGuideBtn.click();
 
-          // Verify BookOpen SVG icon inside button
-          await expect(openGuideBtn.locator('svg')).toBeVisible();
-          await expect(openGuideBtn).toContainText('Öppna snabbguide');
+    const dialog = page.locator('dialog.guide-modal');
+    await expect(dialog).toBeVisible();
 
-          // Click button to open modal
-          await openGuideBtn.click();
+    // Target card must be highlighted
+    await expect(dialog.locator('.guide-highlight')).toBeVisible();
+    await expect(dialog.locator('.guide-highlight .guide-badge')).toContainText(
+      'Relevant för ditt svar',
+    );
 
-          const dialog = page.locator('dialog.guide-modal');
-          await expect(dialog).toBeVisible();
+    // Dismiss modal via close button
+    await page.locator('.guide-modal-close').click();
+    await expect(dialog).toHaveCount(0);
 
-          // Target card must be highlighted
-          await expect(dialog.locator('.guide-highlight')).toBeVisible();
-          await expect(dialog.locator('.guide-highlight .guide-badge')).toContainText(
-            'Relevant för ditt svar',
-          );
-
-          // Dismiss modal via close button
-          await page.locator('.guide-modal-close').click();
-          await expect(dialog).toHaveCount(0);
-
-          // Callout should still be visible in session view
-          await expect(callout).toBeVisible();
-          break;
-        }
-      }
-
-      // Next question if not found yet
-      const selfBtn = page.getByRole('button', { name: 'Jag kunde detta' });
-      if (await selfBtn.isVisible()) {
-        await selfBtn.click();
-      } else {
-        const nextBtn = page.getByRole('button', { name: /^(Nästa fråga|Visa resultat)$/ });
-        if (await nextBtn.isVisible()) {
-          await nextBtn.click();
-        } else {
-          break;
-        }
-      }
-    }
-
-    expect(foundContrastive).toBe(true);
+    // Callout should still be visible in session view
+    await expect(callout).toBeVisible();
   });
 });

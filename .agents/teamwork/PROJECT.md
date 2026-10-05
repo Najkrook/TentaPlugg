@@ -32,7 +32,7 @@
 | M2 | Spaced Repetition & Session Size | Session size selector (5, 10, 20, all due), 4 self-rating buttons, Leitner intervals | M1 | DONE |
 | M3 | Sakura Anime Vibes & Figurer | Theme styling, theme toggle, localStorage persistence, anime figures in Anime mode | M2 | DONE |
 | M_TEST | E2E Requirements Testing Track | 4-tier requirement test suite (Tiers 1-4) published via TEST_READY.md | none | DONE |
-| M4 | Final Milestone & Verification | 100% test pass (existing + new), adversarial hardening (Tier 5), clean Vite build | M1, M2, M3, M_TEST | IN_PROGRESS |
+| M4 | Final Milestone & Verification | 100% test pass (existing + new), adversarial hardening (Tier 5), clean Vite build | M1, M2, M3, M_TEST | DONE |
 
 ## Code Layout
 - `src/engine.js`: Pure logic for SRS intervals, grading, and distractor contrastive feedback. Owned by M1 & M2.
