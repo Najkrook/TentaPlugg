@@ -10,5 +10,19 @@ service cloud.firestore {
         && request.resource.data.payload.size() < 500000
         && request.resource.data.updatedAt is int;
     }
+
+    match /leaderboard/{userId} {
+      allow read: if true;
+      allow create, update: if request.auth != null && request.auth.uid == userId;
+    }
+
+    match /lobbies/{lobbyId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null
+        && request.resource.data.host.uid == request.auth.uid;
+      allow update: if request.auth != null;
+      allow delete: if request.auth != null
+        && (resource.data.host.uid == request.auth.uid || resource.data.guest.uid == request.auth.uid);
+    }
   }
 }

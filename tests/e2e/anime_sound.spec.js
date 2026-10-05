@@ -44,7 +44,9 @@ test.describe('Milestone M4: Anime Sound & Uniform Theme Toggle Tests', () => {
 
     // Unmute sound
     await soundToggle.click();
-    const unmutedStorage = await page.evaluate(() => localStorage.getItem('tentaplugg-sound-muted'));
+    const unmutedStorage = await page.evaluate(() =>
+      localStorage.getItem('tentaplugg-sound-muted'),
+    );
     expect(unmutedStorage).toBe('false');
     await expect(soundToggle).toContainText('Ljud');
 
@@ -59,7 +61,9 @@ test.describe('Milestone M4: Anime Sound & Uniform Theme Toggle Tests', () => {
     expect(pageErrors).toEqual([]);
   });
 
-  test('sound playback calls do not throw unhandled rejections during quiz practice', async ({ page }) => {
+  test('sound playback calls do not throw unhandled rejections during quiz practice', async ({
+    page,
+  }) => {
     const pageErrors = [];
     page.on('pageerror', (err) => pageErrors.push(err.message));
 
@@ -70,15 +74,21 @@ test.describe('Milestone M4: Anime Sound & Uniform Theme Toggle Tests', () => {
     await topbarToggle.click();
 
     // Start practice mode
-    const practiceBtn = page.locator('button:has-text("Öva"), button:has-text("Starta övning"), button:has-text("Börja öva")').first();
+    const practiceBtn = page
+      .locator(
+        'button:has-text("Öva"), button:has-text("Starta övning"), button:has-text("Börja öva")',
+      )
+      .first();
     if (await practiceBtn.isVisible()) {
       await practiceBtn.click();
-      
+
       // Wait for question options
       const optionBtn = page.locator('.option-btn, .choice-btn').first();
       if (await optionBtn.isVisible()) {
         await optionBtn.click();
-        const checkBtn = page.locator('button:has-text("Kontrollera"), button:has-text("Svara")').first();
+        const checkBtn = page
+          .locator('button:has-text("Kontrollera"), button:has-text("Svara")')
+          .first();
         if (await checkBtn.isVisible()) {
           await checkBtn.click();
         }
@@ -88,7 +98,9 @@ test.describe('Milestone M4: Anime Sound & Uniform Theme Toggle Tests', () => {
     expect(pageErrors).toEqual([]);
   });
 
-  test('clicking anime study mascot in Sakura mode triggers arigato sound without errors', async ({ page }) => {
+  test('clicking anime study mascot in Sakura mode triggers arigato sound without errors', async ({
+    page,
+  }) => {
     const pageErrors = [];
     page.on('pageerror', (err) => pageErrors.push(err.message));
 

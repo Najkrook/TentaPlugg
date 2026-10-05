@@ -10,7 +10,10 @@ test('anime sound files exist on disk with valid file size (>10KB)', () => {
     const filePath = path.resolve('public/anime/sounds', sound);
     assert.ok(fs.existsSync(filePath), `File ${sound} should exist in public/anime/sounds/`);
     const stat = fs.statSync(filePath);
-    assert.ok(stat.size > 10000, `File ${sound} should be greater than 10KB (actual: ${stat.size})`);
+    assert.ok(
+      stat.size > 10000,
+      `File ${sound} should be greater than 10KB (actual: ${stat.size})`,
+    );
   }
 });
 

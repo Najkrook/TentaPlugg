@@ -18,8 +18,8 @@ import {
 } from 'firebase/firestore';
 import { mergeProgress } from './engine.js';
 import { PROJECT_ID, AUTH_DOMAIN } from './config.js';
-const emulated =
-  import.meta.env.MODE === 'test' && import.meta.env.VITE_FIREBASE_EMULATORS === 'true';
+const env = typeof import.meta !== 'undefined' ? import.meta.env : undefined;
+const emulated = env?.MODE === 'test' && env?.VITE_FIREBASE_EMULATORS === 'true';
 const app = initializeApp({
   projectId: emulated ? 'demo-tentaplugg' : PROJECT_ID,
   appId: '1:475360574850:web:8ada8aea9c6a8b8555239b',
@@ -27,7 +27,7 @@ const app = initializeApp({
   authDomain: AUTH_DOMAIN,
 });
 export const auth = getAuth(app);
-const db = getFirestore(app);
+export const db = getFirestore(app);
 if (emulated) {
   connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
   connectFirestoreEmulator(db, '127.0.0.1', 8080);

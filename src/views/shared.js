@@ -16,6 +16,9 @@ import {
   Check,
   CircleHelp,
   Volume2,
+  Swords,
+  Trophy,
+  Users,
 } from 'lucide';
 const icons = {
   BookOpen,
@@ -33,6 +36,9 @@ const icons = {
   Check,
   CircleHelp,
   Volume2,
+  Swords,
+  Trophy,
+  Users,
 };
 const markup = ([tag, attrs, children = []]) =>
   `<${tag} ${Object.entries(attrs)

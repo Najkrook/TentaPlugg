@@ -97,20 +97,22 @@ export const guideModalTemplate = (ctx, { guideId, onClose }) => {
  */
 export const guideView = (ctx) => html`
   ${heading('NÄR DU BEHÖVER EN LEDTRÅD', 'Snabbguide', 'Reglerna du oftast behöver på tentorna.')}
-  ${ctx.theme === 'sakura'
-    ? html`<div class="anime-figure guide-anime-hero-card" aria-hidden="true">
-        <div class="guide-anime-peek-wrap">
-          <img src="/anime/mascot_peek.jpg" alt="Chibi catgirl maskot" loading="lazy" />
-        </div>
-        <div class="guide-anime-content">
-          <div class="guide-anime-bubble">
-            <strong>先輩、困ったらここを見てね！♡</strong>
-            <p>Ta det lugnt, senpai! Grammatiken sitter snart! ( ๑>ᴗ<๑ )و ✨</p>
+  ${
+    ctx.theme === 'sakura'
+      ? html`<div class="anime-figure guide-anime-hero-card" aria-hidden="true">
+          <div class="guide-anime-peek-wrap">
+            <img src="/anime/mascot_peek.jpg" alt="Chibi catgirl maskot" loading="lazy" />
           </div>
-          <span class="guide-anime-tag">🌸 KAWAII SENSEI HINTS 🌸</span>
-        </div>
-      </div>`
-    : ''}
+          <div class="guide-anime-content">
+            <div class="guide-anime-bubble">
+              <strong>先輩、困ったらここを見てね！♡</strong>
+              <p>Ta det lugnt, senpai! Grammatiken sitter snart! ( ๑>ᴗ<๑ )و ✨</p>
+            </div>
+            <span class="guide-anime-tag">🌸 KAWAII SENSEI HINTS 🌸</span>
+          </div>
+        </div>`
+      : ''
+  }
   ${guideCards(ctx)}
   <section class="section-block">
     <h2>Repetition med mellanrum</h2>

@@ -16,6 +16,7 @@ Om Windows-sandlådan blockerar testprocesser: `node --test --test-isolation=non
 ## Innehåll
 
 - Tre tentor med samtliga uppgifter, uppdelade i 138 delfrågor.
+- 1v1 Multiplayer Duell: realtidsmatcher med Google-inloggning och ELO-ranking (1200 bas, K=32) över tre grenar (Partikel 1v1, Vokabulär 1v1 baserat på Genki Lektion 3–5, och Ordföljd & Meningar 1v1). 10 snabba frågor med 4 flervalsknappar; snabbast korrekta svar ger +1 poäng och felaktigt svar ger -1 poäng.
 - 27 partikelluckor med originalfacit från Lesson5, dess sex bedömningsövningar och kompletterande övningar.
 - I nya träningspass har de sex meningsövningarna två steg: markera partiklar och rätta markeringarna, sedan byta, flytta, lägga till eller ta bort partiklar direkt i meningen. Klockslagsövningen är bearbetad till ett tydligt partikelfel. Originalmaterialet är kvar.
 - Båda stegen sparas och visas separat. Det automatiska resultatet kräver rätt i båda stegen; självskattningen kan därefter justera repetitionsbedömningen. Luckövningar och tentaläge behåller sina tidigare flöden.

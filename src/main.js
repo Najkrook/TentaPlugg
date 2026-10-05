@@ -31,6 +31,7 @@ import { examsView } from './views/exams.js';
 import { progressView } from './views/progress.js';
 import { guideView, guideModalTemplate, resolveGuideId } from './views/guide.js';
 import { sessionView } from './views/session.js';
+import { multiplayerView, resetMultiplayerView } from './views/multiplayer.js';
 import { icon, dateText } from './views/shared.js';
 import { playAnimeSound, isSoundMuted, toggleSoundMuted } from './audio.js';
 const app = document.querySelector('#app');
@@ -52,6 +53,7 @@ const imageErrors = new Set();
 const navs = [
   ['home', 'BookOpen', 'Plugga'],
   ['exams', 'GraduationCap', 'Gamla tentor'],
+  ['multiplayer', 'Swords', '1v1 Duell'],
   ['progress', 'ChartNoAxesCombined', 'Mina framsteg'],
   ['guide', 'Library', 'Snabbguide'],
 ];
@@ -229,6 +231,8 @@ function getCtx() {
       composing = value;
     },
     speak: speakText,
+    account,
+    render: () => render(),
   };
 }
 function render(focus = false) {
@@ -245,9 +249,11 @@ function render(focus = false) {
       ? homeView(ctx)
       : view === 'exams'
         ? examsView(ctx)
-        : view === 'progress'
-          ? progressView(ctx)
-          : guideView(ctx);
+        : view === 'multiplayer'
+          ? multiplayerView(ctx)
+          : view === 'progress'
+            ? progressView(ctx)
+            : guideView(ctx);
   renderTemplate(
     html`<aside class="sidebar">
         <a
@@ -271,7 +277,9 @@ function render(focus = false) {
             title=${state.theme === 'sakura' ? 'Växla till klassiskt tema' : 'Kawaii-ify'}
             aria-label=${state.theme === 'sakura' ? 'Växla till klassiskt tema' : 'Kawaii-ify'}
           >
-            <span class="theme-icon" aria-hidden="true">${state.theme === 'sakura' ? '🎓' : '🌸'}</span>
+            <span class="theme-icon" aria-hidden="true"
+              >${state.theme === 'sakura' ? '🎓' : '🌸'}</span
+            >
             <span class="theme-label">${state.theme === 'sakura' ? 'Klassisk' : 'Kawaii-ify'}</span>
           </button>
           <div class="exam-note">
@@ -288,18 +296,22 @@ function render(focus = false) {
           <span class="breadcrumb">Japanska för nybörjare <span>/</span> GEMA70</span
           ><span class="mobile-brand"><span lang="ja">学</span><b>TentaPlugg</b></span>
           <div class="topbar-actions">
-            ${state.theme === 'sakura'
-              ? html`<button
-                  type="button"
-                  class="theme-toggle sound-toggle"
-                  @click=${toggleMute}
-                  title=${isSoundMuted() ? 'Slå på anime-ljud' : 'Stäng av anime-ljud'}
-                  aria-label=${isSoundMuted() ? 'Slå på anime-ljud' : 'Stäng av anime-ljud'}
-                >
-                  <span class="theme-icon" aria-hidden="true">${isSoundMuted() ? '🔇' : '🔊'}</span>
-                  <span class="sound-label">${isSoundMuted() ? 'Tyst' : 'Ljud'}</span>
-                </button>`
-              : ''}
+            ${
+              state.theme === 'sakura'
+                ? html`<button
+                    type="button"
+                    class="theme-toggle sound-toggle"
+                    @click=${toggleMute}
+                    title=${isSoundMuted() ? 'Slå på anime-ljud' : 'Stäng av anime-ljud'}
+                    aria-label=${isSoundMuted() ? 'Slå på anime-ljud' : 'Stäng av anime-ljud'}
+                  >
+                    <span class="theme-icon" aria-hidden="true"
+                      >${isSoundMuted() ? '🔇' : '🔊'}</span
+                    >
+                    <span class="sound-label">${isSoundMuted() ? 'Tyst' : 'Ljud'}</span>
+                  </button>`
+                : ''
+            }
             <button
               type="button"
               class="theme-toggle topbar-theme-toggle"
@@ -307,8 +319,12 @@ function render(focus = false) {
               title=${state.theme === 'sakura' ? 'Växla till klassiskt tema' : 'Kawaii-ify'}
               aria-label=${state.theme === 'sakura' ? 'Växla till klassiskt tema' : 'Kawaii-ify'}
             >
-              <span class="theme-icon" aria-hidden="true">${state.theme === 'sakura' ? '🎓' : '🌸'}</span>
-              <span class="theme-label">${state.theme === 'sakura' ? 'Klassisk' : 'Kawaii-ify'}</span>
+              <span class="theme-icon" aria-hidden="true"
+                >${state.theme === 'sakura' ? '🎓' : '🌸'}</span
+              >
+              <span class="theme-label"
+                >${state.theme === 'sakura' ? 'Klassisk' : 'Kawaii-ify'}</span
+              >
             </button>
             <button class="account" id="account" ?disabled=${authBusy} @click=${account}>
               ${icon(user ? 'LogOut' : 'LogIn')}<span
@@ -321,7 +337,7 @@ function render(focus = false) {
         <footer><span id="cloud-status">${status}</span><span>GEMA70 · JAPC11</span></footer>
       </div>
       <nav class="mobile-nav">
-        ${navs.map(([id, i, l]) => html`<button class=${view === id ? 'active' : ''} @click=${() => navigate(id)}>${icon(i)}<span>${id === 'progress' ? 'Framsteg' : id === 'exams' ? 'Tentor' : l}</span></button>`)}
+        ${navs.map(([id, i, l]) => html`<button class=${view === id ? 'active' : ''} @click=${() => navigate(id)}>${icon(i)}<span>${id === 'progress' ? 'Framsteg' : id === 'exams' ? 'Tentor' : id === 'multiplayer' ? '1v1' : l}</span></button>`)}
       </nav>
       <div class="sr-only" role="status" aria-live="polite" aria-atomic="true">${message}</div>
       ${message ? html`<div id="toast" aria-hidden="true">${message}</div>` : ''}`,
@@ -427,6 +443,9 @@ function ask(text, confirmLabel = 'Fortsätt') {
 }
 function navigate(id) {
   flush();
+  if (view === 'multiplayer' && id !== 'multiplayer') {
+    resetMultiplayerView();
+  }
   session = null;
   view = id;
   render(true);
@@ -547,6 +566,7 @@ function resumeDraft(draft) {
 }
 function exit() {
   flush();
+  resetMultiplayerView();
   session = null;
   view = 'home';
   render(true);

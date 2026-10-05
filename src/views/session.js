@@ -124,9 +124,13 @@ export function sessionView(ctx) {
                         aria-hidden="true"
                       >
                         <div class="anime-feedback-bubble">
-                          ${s.grades[q.id]
-                            ? html`<span class="bubble-jp">すごい！完璧〜！💮</span><small>Senpai, du är bäst! ✨</small>`
-                            : html`<span class="bubble-jp">うわあああ〜！(╥﹏╥)</span><small>Kämpa på, senpai! 💕</small>`}
+                          ${
+                            s.grades[q.id]
+                              ? html`<span class="bubble-jp">すごい！完璧〜！💮</span
+                                  ><small>Senpai, du är bäst! ✨</small>`
+                              : html`<span class="bubble-jp">うわあああ〜！(╥﹏╥)</span
+                                  ><small>Kämpa på, senpai! 💕</small>`
+                          }
                         </div>
                         <img
                           src="${s.grades[q.id] ? '/anime/cheer.jpg' : '/anime/mascot_cry.jpg'}"
@@ -316,8 +320,18 @@ function resultView(ctx) {
       ctx.theme === 'sakura'
         ? html`<div class="anime-figure anime-result-mascot" aria-hidden="true">
             <div class="anime-result-wrapper">
-              <img class="result-mascot-img" src="/anime/cheer.jpg" alt="やった！ Bra jobbat!" loading="lazy" />
-              <img class="result-stamp-img" src="/anime/stamp_sakura.jpg" alt="たいへんよくできました" loading="lazy" />
+              <img
+                class="result-mascot-img"
+                src="/anime/cheer.jpg"
+                alt="やった！ Bra jobbat!"
+                loading="lazy"
+              />
+              <img
+                class="result-stamp-img"
+                src="/anime/stamp_sakura.jpg"
+                alt="たいへんよくできました"
+                loading="lazy"
+              />
               <div class="kawaii-speech-bubble result-bubble">
                 <span>先輩、本当にお疲れ様でした〜！💮✨</span>
                 <small>Helt fantastiskt kämpat! 💕 ( ๑>ᴗ<๑ )</small>

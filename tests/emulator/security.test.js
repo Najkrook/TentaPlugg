@@ -37,6 +37,35 @@ test('invalid shapes and oversized payloads are rejected', async () => {
   await assertFails(setDoc(ref, { payload: '{}', updatedAt: 1, public: true }));
   await assertFails(setDoc(ref, { payload: 'x'.repeat(500001), updatedAt: 1 }));
 });
+test('leaderboard is readable by anyone, only owner can write own record', async () => {
+  const a = env.authenticatedContext('alice').firestore(),
+    b = env.authenticatedContext('bob').firestore(),
+    guest = env.unauthenticatedContext().firestore();
+  await assertSucceeds(setDoc(doc(a, 'leaderboard/alice'), { elo: 1250, wins: 2 }));
+  await assertSucceeds(getDoc(doc(guest, 'leaderboard/alice')));
+  await assertSucceeds(getDoc(doc(b, 'leaderboard/alice')));
+  await assertFails(setDoc(doc(b, 'leaderboard/alice'), { elo: 900 }));
+  await assertFails(setDoc(doc(guest, 'leaderboard/alice'), { elo: 900 }));
+});
+test('lobbies require authentication to read, create, update', async () => {
+  const a = env.authenticatedContext('alice').firestore(),
+    b = env.authenticatedContext('bob').firestore(),
+    guest = env.unauthenticatedContext().firestore();
+  await assertFails(getDoc(doc(guest, 'lobbies/lobby1')));
+  await assertFails(setDoc(doc(guest, 'lobbies/lobby1'), { host: { uid: 'guest' } }));
+  await assertSucceeds(
+    setDoc(doc(a, 'lobbies/lobby1'), { host: { uid: 'alice' }, status: 'waiting' }),
+  );
+  await assertFails(setDoc(doc(a, 'lobbies/lobby2'), { host: { uid: 'bob' }, status: 'waiting' }));
+  await assertSucceeds(getDoc(doc(b, 'lobbies/lobby1')));
+  await assertSucceeds(
+    setDoc(doc(b, 'lobbies/lobby1'), {
+      host: { uid: 'alice' },
+      guest: { uid: 'bob' },
+      status: 'ready',
+    }),
+  );
+});
 test('auth emulator issues isolated identities and rejects a wrong password', async () => {
   const endpoint = 'http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/accounts:';
   const email = `test-${Date.now()}@example.test`;
