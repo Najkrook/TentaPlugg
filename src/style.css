@@ -2497,7 +2497,13 @@ html:not([data-theme='sakura']) .anime-figure,
 [data-theme='classic'] .anime-figure,
 :root:not([data-theme='sakura']) .sound-toggle,
 html:not([data-theme='sakura']) .sound-toggle,
-[data-theme='classic'] .sound-toggle {
+[data-theme='classic'] .sound-toggle,
+:root:not([data-theme='sakura']) .sound-slider-wrapper,
+html:not([data-theme='sakura']) .sound-slider-wrapper,
+[data-theme='classic'] .sound-slider-wrapper,
+:root:not([data-theme='sakura']) .sound-slider,
+html:not([data-theme='sakura']) .sound-slider,
+[data-theme='classic'] .sound-slider {
   display: none !important;
 }
 
@@ -3006,6 +3012,97 @@ html:not([data-theme='sakura']) .sound-toggle,
   transition:
     background 0.15s ease,
     border-color 0.15s ease;
+}
+
+/* Sound Volume Slider in Sakura Mode */
+.sound-slider-wrapper {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 40px;
+  padding: 4px 12px;
+  box-sizing: border-box;
+  background: linear-gradient(135deg, #fff0f5, #ffd6e7);
+  border: 1px solid #f472b6;
+  border-radius: 9999px;
+  box-shadow: 0 3px 12px rgba(244, 114, 182, 0.25);
+  color: #9c1f52;
+  font-size: 11px;
+  font-weight: 600;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.sound-slider-icon {
+  font-size: 13px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+}
+
+.sound-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 68px;
+  height: 6px;
+  background: #fcc2d7;
+  border-radius: 9999px;
+  outline: none;
+  cursor: pointer;
+  margin: 0;
+  accent-color: #b82763;
+  transition: opacity 0.15s ease;
+}
+
+.sound-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #b82763;
+  border: 2px solid #ffffff;
+  box-shadow: 0 2px 6px rgba(184, 39, 99, 0.35);
+  cursor: pointer;
+  transition:
+    transform 0.15s ease,
+    background 0.15s ease;
+}
+
+.sound-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+  background: #9c1f52;
+}
+
+.sound-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #b82763;
+  border: 2px solid #ffffff;
+  box-shadow: 0 2px 6px rgba(184, 39, 99, 0.35);
+  cursor: pointer;
+  transition:
+    transform 0.15s ease,
+    background 0.15s ease;
+}
+
+.sound-slider::-moz-range-thumb:hover {
+  transform: scale(1.15);
+  background: #9c1f52;
+}
+
+.sound-slider:focus-visible {
+  outline: 2px solid #b82763;
+  outline-offset: 2px;
+}
+
+.sound-slider-val {
+  min-width: 26px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: #8a1f4b;
 }
 
 /* Page Headings & Overlines */
@@ -3874,18 +3971,24 @@ html:not([data-theme='sakura']) .sound-toggle,
     min-width: 0;
   }
   .topbar-theme-toggle .theme-label,
-  .sound-toggle .sound-label {
+  .sound-toggle .sound-label,
+  .sound-slider-val {
     display: none;
   }
   .topbar-theme-toggle,
-  .sound-toggle {
+  .sound-toggle,
+  .sound-slider-wrapper {
     padding: 6px 9px;
-    gap: 0;
+    gap: 4px;
     min-height: 36px;
-    min-width: 36px;
+    height: 36px;
     justify-content: center;
     box-sizing: border-box;
     flex-shrink: 0;
+  }
+  .sound-slider {
+    width: 48px;
+    height: 5px;
   }
   .account {
     padding: 6px 10px;
@@ -3965,9 +4068,17 @@ html:not([data-theme='sakura']) .sound-toggle,
     gap: 5px;
   }
   .topbar-theme-toggle,
-  .sound-toggle {
+  .sound-toggle,
+  .sound-slider-wrapper {
     padding: 5px 8px;
     min-height: 34px;
+    height: 34px;
+  }
+  .sound-slider {
+    width: 40px;
+  }
+  .topbar-theme-toggle,
+  .sound-toggle {
     min-width: 34px;
     font-size: 12px;
   }
@@ -4008,10 +4119,19 @@ html:not([data-theme='sakura']) .sound-toggle,
     padding: 5px 7px;
   }
   .topbar-theme-toggle,
-  .sound-toggle {
+  .sound-toggle,
+  .sound-slider-wrapper {
     min-width: 32px;
     min-height: 32px;
+    height: 32px;
     padding: 4px 6px;
+  }
+  .sound-slider {
+    width: 34px;
+    height: 4px;
+  }
+  .sound-slider-icon {
+    font-size: 11px;
   }
 }
 

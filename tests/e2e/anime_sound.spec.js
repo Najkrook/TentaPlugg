@@ -31,10 +31,22 @@ test.describe('Milestone M4: Anime Sound & Uniform Theme Toggle Tests', () => {
     await expect(topbarToggle).toContainText('Klassisk');
     await expect(sidebarToggle).toContainText('Klassisk');
 
-    // Check sound toggle is visible in Sakura mode
+    // Check sound toggle and slider are visible in Sakura mode
     const soundToggle = page.locator('.sound-toggle');
     await expect(soundToggle).toBeVisible();
     await expect(soundToggle).toContainText('Ljud');
+
+    const soundSlider = page.locator('.sound-slider');
+    const soundSliderWrapper = page.locator('.sound-slider-wrapper');
+    await expect(soundSliderWrapper).toBeVisible();
+    await expect(soundSlider).toBeVisible();
+    expect(await soundSlider.inputValue()).toBe('50');
+
+    // Adjust volume slider to 70%
+    await soundSlider.fill('70');
+    await soundSlider.dispatchEvent('input');
+    const storedVolume = await page.evaluate(() => localStorage.getItem('tentaplugg-sound-volume'));
+    expect(storedVolume).toBe('0.7');
 
     // Mute sound
     await soundToggle.click();
@@ -55,8 +67,9 @@ test.describe('Milestone M4: Anime Sound & Uniform Theme Toggle Tests', () => {
     await expect(topbarToggle).toContainText('Kawaii-ify');
     await expect(sidebarToggle).toContainText('Kawaii-ify');
 
-    // Sound toggle must be hidden in Classic mode
+    // Sound toggle and slider must be hidden in Classic mode
     await expect(soundToggle).toBeHidden();
+    await expect(soundSliderWrapper).toBeHidden();
 
     expect(pageErrors).toEqual([]);
   });

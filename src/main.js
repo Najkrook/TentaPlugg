@@ -33,7 +33,14 @@ import { guideView, guideModalTemplate, resolveGuideId } from './views/guide.js'
 import { sessionView } from './views/session.js';
 import { multiplayerView, resetMultiplayerView } from './views/multiplayer.js';
 import { icon, dateText } from './views/shared.js';
-import { playAnimeSound, isSoundMuted, toggleSoundMuted } from './audio.js';
+import {
+  playAnimeSound,
+  isSoundMuted,
+  setSoundMuted,
+  toggleSoundMuted,
+  getSoundVolume,
+  setSoundVolume,
+} from './audio.js';
 const app = document.querySelector('#app');
 let user = null,
   state = fresh(),
@@ -85,7 +92,20 @@ function toggleTheme() {
   }
 }
 function toggleMute() {
-  toggleSoundMuted();
+  const next = toggleSoundMuted();
+  if (!next && getSoundVolume() === 0) {
+    setSoundVolume(0.5);
+  }
+  render();
+}
+function handleVolumeChange(e) {
+  const newVol = Number(e.target.value) / 100;
+  setSoundVolume(newVol);
+  if (newVol > 0 && isSoundMuted()) {
+    setSoundMuted(false);
+  } else if (newVol === 0 && !isSoundMuted()) {
+    setSoundMuted(true);
+  }
   render();
 }
 function setTheme(next) {
@@ -302,14 +322,32 @@ function render(focus = false) {
                     type="button"
                     class="theme-toggle sound-toggle"
                     @click=${toggleMute}
-                    title=${isSoundMuted() ? 'Slå på anime-ljud' : 'Stäng av anime-ljud'}
-                    aria-label=${isSoundMuted() ? 'Slå på anime-ljud' : 'Stäng av anime-ljud'}
+                    title=${isSoundMuted() || getSoundVolume() === 0 ? 'Slå på anime-ljud' : 'Stäng av anime-ljud'}
+                    aria-label=${isSoundMuted() || getSoundVolume() === 0 ? 'Slå på anime-ljud' : 'Stäng av anime-ljud'}
                   >
                     <span class="theme-icon" aria-hidden="true"
-                      >${isSoundMuted() ? '🔇' : '🔊'}</span
+                      >${isSoundMuted() || getSoundVolume() === 0 ? '🔇' : '🔊'}</span
                     >
-                    <span class="sound-label">${isSoundMuted() ? 'Tyst' : 'Ljud'}</span>
-                  </button>`
+                    <span class="sound-label">${isSoundMuted() || getSoundVolume() === 0 ? 'Tyst' : 'Ljud'}</span>
+                  </button>
+                  <div
+                    class="sound-slider-wrapper"
+                    title="Anime-ljud: ${Math.round(getSoundVolume() * 100)}%"
+                  >
+                    <span class="sound-slider-icon" aria-hidden="true">🌸</span>
+                    <input
+                      type="range"
+                      class="sound-slider"
+                      min="0"
+                      max="100"
+                      step="5"
+                      .value=${String(Math.round(getSoundVolume() * 100))}
+                      @input=${handleVolumeChange}
+                      aria-label="Volym anime-ljud"
+                      title="Volym: ${Math.round(getSoundVolume() * 100)}%"
+                    />
+                    <span class="sound-slider-val">${Math.round(getSoundVolume() * 100)}%</span>
+                  </div>`
                 : ''
             }
             <button
