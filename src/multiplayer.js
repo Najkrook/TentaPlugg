@@ -18,6 +18,7 @@ import { normalize } from './engine.js';
 export const DEFAULT_ELO = 1200;
 export const K_FACTOR = 32;
 export const ROUND_TIME_MS = 8000;
+export const TIMEOUT_PENALTY = -50;
 export const ROUND_PAUSE_MS = 2000;
 export const QUESTIONS_PER_MATCH = 10;
 export const MAX_PLAYERS = 10;
@@ -413,25 +414,59 @@ export function getPlayerMatchOutcome(game, uid) {
   return game.isDraw && scores[uid] === topScore ? 'draw' : 'loss';
 }
 
-function closeRound(game, now, playersMap = null) {
-  if (game.currentRoundIndex >= game.questions.length - 1) {
-    return finalizeMatch(game, now, playersMap);
+/**
+ * Applies -50 point penalty to any active player who did not submit an answer in the round.
+ */
+export function applyTimeoutPenalties(game, now) {
+  const roundIdx = game.currentRoundIndex || 0;
+  const roundAnswers = { ...(game.answers?.[roundIdx] || {}) };
+  const newScores = { ...(game.scores || {}) };
+  const activeUids = getActivePlayerUids(game);
+
+  for (const uid of activeUids) {
+    if (!roundAnswers[uid]) {
+      roundAnswers[uid] = {
+        uid,
+        roundIndex: roundIdx,
+        answer: null,
+        timestamp: now,
+        isCorrect: false,
+        pointsAwarded: TIMEOUT_PENALTY,
+        timedOut: true,
+      };
+      newScores[uid] = (newScores[uid] || 0) + TIMEOUT_PENALTY;
+    }
   }
-  const roundAnswers = game.answers?.[game.currentRoundIndex] || {};
-  const leaderboardSnapshot = Object.values(playersMap || game.players || {})
+
+  const answers = { ...(game.answers || {}), [roundIdx]: roundAnswers };
+  return {
+    ...game,
+    scores: newScores,
+    answers,
+  };
+}
+
+export function closeRound(game, now, playersMap = null) {
+  const penalized = applyTimeoutPenalties(game, now);
+
+  if (penalized.currentRoundIndex >= penalized.questions.length - 1) {
+    return finalizeMatch(penalized, now, playersMap);
+  }
+  const roundAnswers = penalized.answers?.[penalized.currentRoundIndex] || {};
+  const leaderboardSnapshot = Object.values(playersMap || penalized.players || {})
     .map((p) => ({
       uid: p.uid,
       displayName: p.displayName,
       photoURL: p.photoURL || null,
-      score: game.scores?.[p.uid] || 0,
+      score: penalized.scores?.[p.uid] || 0,
       roundPoints: roundAnswers[p.uid]?.pointsAwarded || 0,
     }))
     .sort((a, b) => b.score - a.score);
   return {
-    ...game,
+    ...penalized,
     leaderboardSnapshot,
     status: 'round_end',
-    roundWinner: game.roundWinners?.[game.currentRoundIndex] || 'none',
+    roundWinner: penalized.roundWinners?.[penalized.currentRoundIndex] || 'none',
     roundEndAt: now,
     nextRoundAt: now + ROUND_PAUSE_MS,
   };
@@ -439,15 +474,11 @@ function closeRound(game, now, playersMap = null) {
 
 /**
  * Pure evaluation function for answering a round in a game.
- * Strictly checks:
- * 1. game.status === 'playing'
- * 2. now >= game.roundStartTime (countdown completed)
- * 3. now - game.roundStartTime <= ROUND_TIME_MS (not expired)
- * 4. !game.answers[roundIdx][uid] (not already answered by this player)
- *
- * Awards time-based points:
- * - Correct: round(1000 * max(0.2, 1 - responseTimeMs / 8000))
- * - Incorrect: -250 penalty
+ * Timing mechanic:
+ * - 8-second countdown begins ONLY when the first player submits an answer.
+ * - The first player gets responseTime = 0 (1000 points if correct, -250 if wrong).
+ * - Subsequent players measure response time from that first answer (up to 8 seconds).
+ * - Anyone who does not answer before the 8s countdown expires gets -50 points.
  *
  * Adaptively ends round when all active players have answered.
  */
@@ -460,13 +491,13 @@ export function evaluateRound(game, uid, selectedAnswer, now = Date.now(), playe
   const currentQ = game.questions?.[roundIdx];
   if (!currentQ) return game;
 
-  // 1. Guard against submissions before round countdown ends
+  // 1. Guard against submissions before initial round countdown ends (round 0 only)
   if (game.roundStartTime && now < game.roundStartTime) {
     return game;
   }
 
-  // 2. Guard against submissions after round time has expired (> ROUND_TIME_MS)
-  if (game.roundStartTime && now - game.roundStartTime > ROUND_TIME_MS) {
+  // 2. Guard against submissions after round time has expired (> ROUND_TIME_MS after first answer)
+  if (game.firstAnswerAt && now - game.firstAnswerAt > ROUND_TIME_MS) {
     return game;
   }
 
@@ -476,8 +507,13 @@ export function evaluateRound(game, uid, selectedAnswer, now = Date.now(), playe
     return game;
   }
 
+  const isFirstAnswer = !game.firstAnswerAt;
+  const firstAnswerAt = isFirstAnswer ? now : game.firstAnswerAt;
   const isCorrect = isAnswerCorrect(currentQ, selectedAnswer);
-  const responseTimeMs = Math.max(0, now - (game.roundStartTime || now));
+
+  // First answer starts the 8-second timer; response time for first answer is 0.
+  // Subsequent answers measure response time from when the first answer was submitted.
+  const responseTimeMs = isFirstAnswer ? 0 : Math.max(0, now - firstAnswerAt);
   const pointsAwarded = calculateTimePoints(isCorrect, responseTimeMs);
 
   roundAnswers[uid] = {
@@ -503,6 +539,8 @@ export function evaluateRound(game, uid, selectedAnswer, now = Date.now(), playe
   const answers = { ...(game.answers || {}), [roundIdx]: roundAnswers };
   const updated = {
     ...game,
+    firstAnswerAt,
+    roundDeadline: firstAnswerAt + ROUND_TIME_MS,
     scores: newScores,
     answers,
     roundWinners,
@@ -528,6 +566,8 @@ export function advanceToNextRound(game, now = Date.now()) {
     status: 'playing',
     currentRoundIndex: nextIdx,
     roundStartTime: now,
+    firstAnswerAt: null,
+    roundDeadline: null,
     roundWinner: null,
     roundEndAt: null,
     nextRoundAt: null,
@@ -841,6 +881,8 @@ export async function startMatch(lobbyId) {
       questions: questionsList,
       currentRoundIndex: 0,
       roundStartTime: now + 3000, // 3s countdown before first round
+      firstAnswerAt: null,
+      roundDeadline: null,
       hostUid: data.host.uid,
       guestUid,
       hostElo: data.host.elo || DEFAULT_ELO,
@@ -888,8 +930,10 @@ export async function submitPlayerAnswer(lobbyId, uid, roundIndex, selectedAnswe
     if (updatedGame === game) return null;
 
     const updatedPlayers = { ...(data.players || {}) };
-    if (updatedPlayers[uid]) {
-      updatedPlayers[uid] = { ...updatedPlayers[uid], score: updatedGame.scores[uid] };
+    for (const pUid of Object.keys(updatedGame.scores || {})) {
+      if (updatedPlayers[pUid]) {
+        updatedPlayers[pUid] = { ...updatedPlayers[pUid], score: updatedGame.scores[pUid] };
+      }
     }
 
     if (updatedGame.status === 'finished') {
@@ -936,8 +980,8 @@ export async function advanceRoundIfDue(lobbyId) {
       });
     } else if (
       game.status === 'playing' &&
-      game.roundStartTime &&
-      now - game.roundStartTime > ROUND_TIME_MS
+      ((game.firstAnswerAt && now - game.firstAnswerAt > ROUND_TIME_MS) ||
+       (game.roundStartTime && now - game.roundStartTime > 60000))
     ) {
       const playersMap = data.players || {};
       const updated = closeRound(game, now, playersMap);

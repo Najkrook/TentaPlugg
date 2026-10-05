@@ -4504,6 +4504,30 @@ html:not([data-theme='sakura']) .sound-toggle,
   color: #20552d;
   font-weight: 700;
 }
+.timer-countdown-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 12px;
+  transition: all 0.2s ease;
+}
+.timer-countdown-badge.waiting-answer {
+  background: #f1f3f2;
+  color: var(--muted);
+}
+.timer-countdown-badge.active-countdown {
+  background: #fff3bf;
+  color: #b05700;
+  font-weight: 800;
+  animation: timerBadgePulse 1s ease-in-out infinite;
+}
+@keyframes timerBadgePulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.04); }
+}
 .timer-track {
   width: 100%;
   max-width: 180px;
@@ -4517,6 +4541,13 @@ html:not([data-theme='sakura']) .sound-toggle,
   background: var(--green);
   border-radius: 4px;
   transition: width 0.25s linear;
+}
+.timer-fill.timer-idle {
+  background: #adb5bd;
+  opacity: 0.6;
+}
+.timer-fill.timer-running {
+  background: #f59f00;
 }
 
 /* Arena Countdown */
@@ -4749,6 +4780,12 @@ html:not([data-theme='sakura']) .sound-toggle,
 .mini-lb-gain {
   font-size: 12px;
   color: #20552d;
+  font-weight: 700;
+  margin-right: 12px;
+}
+.mini-lb-loss {
+  font-size: 12px;
+  color: #c92a2a;
   font-weight: 700;
   margin-right: 12px;
 }
@@ -5033,4 +5070,11 @@ html:not([data-theme='sakura']) .sound-toggle,
 }
 [data-theme='sakura'] .mini-lb-score {
   color: #a82e66;
+}
+[data-theme='sakura'] .timer-countdown-badge.active-countdown {
+  background: #ffe3ec;
+  color: #a82e66;
+}
+[data-theme='sakura'] .timer-fill.timer-running {
+  background: #d6336c;
 }

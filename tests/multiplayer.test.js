@@ -16,6 +16,9 @@ import {
   buildFourChoices,
   DEFAULT_ELO,
   ROUND_TIME_MS,
+  TIMEOUT_PENALTY,
+  applyTimeoutPenalties,
+  closeRound,
 } from '../src/multiplayer.js';
 
 test('ELO rating calculations match FIDE formulas', () => {
@@ -203,8 +206,8 @@ test('P2 Fix: Valid alternative Japanese answers are accepted and never used as 
   const roundAfterHe = evaluateRound(testGame, 'alice', 'へ', 2000);
   assert.equal(
     roundAfterHe.scores.alice,
-    875,
-    'Alice receives time points (875p) for valid answer へ',
+    1000,
+    'Alice receives time points (1000p) for being first to give valid answer へ',
   );
   assert.equal(roundAfterHe.roundWinners[0], 'alice', 'Alice is marked as round winner');
 });
@@ -245,7 +248,7 @@ test('P1 Fix: Late answers cannot modify closed rounds or expired rounds', () =>
 
   // 2. Both players answer in round 0: Bob answers correctly at t=2000, Alice at t=2500
   const afterBob = evaluateRound(game, 'bob', 'B', 2000);
-  assert.equal(afterBob.scores.bob, 875);
+  assert.equal(afterBob.scores.bob, 1000, 'Bob answered first and receives 1000 points');
   assert.equal(afterBob.status, 'playing', 'Round still active waiting for Alice');
 
   const afterBoth = evaluateRound(afterBob, 'alice', 'A', 2500);
@@ -258,9 +261,9 @@ test('P1 Fix: Late answers cannot modify closed rounds or expired rounds', () =>
 
   // 3. Late submit after round is closed (round_end) cannot modify scores
   const lateAttempt = evaluateRound(afterBoth, 'bob', 'B', 3000);
-  assert.equal(lateAttempt.scores.bob, 875, 'Score not modified after round closed');
+  assert.equal(lateAttempt.scores.bob, 1000, 'Score not modified after round closed');
 
-  // 4. Test round timeout (> ROUND_TIME_MS)
+  // 4. Test round timeout (> ROUND_TIME_MS after first answer)
   const freshGame = {
     questions: [
       {
@@ -281,8 +284,14 @@ test('P1 Fix: Late answers cannot modify closed rounds or expired rounds', () =>
     status: 'playing',
   };
 
-  // Submitting at t=10000 (elapsed = 9000ms > 8000ms timeout)
-  const timedOutSubmit = evaluateRound(freshGame, 'alice', 'B', 10000);
+  const gameWithFirstAnswer = {
+    ...freshGame,
+    firstAnswerAt: 1000,
+    roundDeadline: 9000,
+  };
+
+  // Submitting at t=10000 (> 1000 + 8000ms timeout)
+  const timedOutSubmit = evaluateRound(gameWithFirstAnswer, 'alice', 'B', 10000);
   assert.equal(timedOutSubmit.scores.alice, 0, 'Submission after 8s timeout must NOT award points');
   assert(!timedOutSubmit.answers?.[0]?.alice, 'Timed out submission must not be recorded');
 });
@@ -343,9 +352,10 @@ test('Round evaluation: time-based scoring and adaptive round completion when al
     'Round still active since Bob has not answered yet',
   );
 
-  // Bob answers right ('B') at t=3000 (elapsed 2000ms) -> round(1000 * (1 - 2000/8000)) = 750 points
+  // Bob answers right ('B') at t=3000 (1000ms after Alice's firstAnswerAt at 2000)
+  // round(1000 * (1 - 1000/8000)) = 875 points
   const afterBobCorrect = evaluateRound(afterAliceWrong, 'bob', 'B', 3000);
-  assert.equal(afterBobCorrect.scores.bob, 750, 'Bob receives 750 time-based points');
+  assert.equal(afterBobCorrect.scores.bob, 875, 'Bob receives 875 time-based points');
   assert.equal(afterBobCorrect.roundWinners[0], 'bob', 'Bob is marked as round winner');
   assert.equal(
     afterBobCorrect.status,
@@ -364,12 +374,14 @@ test('Round evaluation: time-based scoring and adaptive round completion when al
   assert.equal(round2.roundWinner, null);
 
   // Round 2 (last round): both players answer
-  const round2Alice = evaluateRound(round2, 'alice', 'C', 4500); // correct: 1000 - 500/8000 * 1000 = 938
-  const finalGame = evaluateRound(round2Alice, 'bob', 'C', 5000); // correct: 1000 - 1000/8000 * 1000 = 875
+  // Alice answers first at t=4500 (starts countdown -> 1000 points)
+  const round2Alice = evaluateRound(round2, 'alice', 'C', 4500);
+  // Bob answers at t=5000 (500ms after Alice's firstAnswerAt: 1000 - 500/8000 * 1000 = 938 points)
+  const finalGame = evaluateRound(round2Alice, 'bob', 'C', 5000);
 
   assert.equal(finalGame.status, 'finished', 'Match finishes on final question after all answered');
-  assert.equal(finalGame.scores.bob, 750 + 875);
-  assert.equal(finalGame.scores.alice, -250 + 938);
+  assert.equal(finalGame.scores.bob, 875 + 938);
+  assert.equal(finalGame.scores.alice, -250 + 1000);
   assert.equal(finalGame.winnerUid, 'bob', 'Bob wins the match with higher score');
   assert(finalGame.eloChanges.bob > 0, 'Bob gains ELO');
   assert(finalGame.eloChanges.alice < 0, 'Alice loses ELO');
@@ -431,4 +443,37 @@ test('round completion excludes forfeited players and their previously submitted
   const first = evaluateRound(game, 'a', 'A', 2000);
   assert.equal(first.status, 'playing');
   assert.equal(evaluateRound(first, 'b', 'A', 2100).status, 'round_end');
+});
+
+test('Omitted answer penalty: active players without answer receive -50 points upon round close', () => {
+  const game = {
+    questions: [
+      { id: 'q1', prompt: 'Fråga 1', choices: ['A', 'B'], correctAnswer: 'A' },
+      { id: 'q2', prompt: 'Fråga 2', choices: ['A', 'B'], correctAnswer: 'B' },
+    ],
+    currentRoundIndex: 0,
+    roundStartTime: 1000,
+    playerUids: ['alice', 'bob', 'charlie'],
+    scores: { alice: 100, bob: 200, charlie: 300 },
+    answers: {},
+    status: 'playing',
+  };
+
+  // Alice answers first at t=2000 -> countdown starts from t=2000
+  const afterAlice = evaluateRound(game, 'alice', 'A', 2000);
+  assert.equal(afterAlice.firstAnswerAt, 2000);
+  assert.equal(afterAlice.roundDeadline, 10000);
+  assert.equal(afterAlice.scores.alice, 100 + 1000);
+
+  // Bob and Charlie do not answer. Round expires and is closed at t=10500 (> 8s after Alice)
+  const closed = closeRound(afterAlice, 10500);
+  assert.equal(closed.status, 'round_end');
+  assert.equal(closed.scores.alice, 1100, 'Alice keeps her points');
+  assert.equal(closed.scores.bob, 200 + TIMEOUT_PENALTY, 'Bob penalized -50 for omitting answer');
+  assert.equal(closed.scores.charlie, 300 + TIMEOUT_PENALTY, 'Charlie penalized -50 for omitting answer');
+
+  assert.equal(closed.answers[0].bob.timedOut, true);
+  assert.equal(closed.answers[0].bob.pointsAwarded, TIMEOUT_PENALTY);
+  assert.equal(closed.answers[0].charlie.timedOut, true);
+  assert.equal(closed.answers[0].charlie.pointsAwarded, TIMEOUT_PENALTY);
 });
