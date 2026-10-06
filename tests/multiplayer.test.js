@@ -470,7 +470,11 @@ test('Omitted answer penalty: active players without answer receive -50 points u
   assert.equal(closed.status, 'round_end');
   assert.equal(closed.scores.alice, 1100, 'Alice keeps her points');
   assert.equal(closed.scores.bob, 200 + TIMEOUT_PENALTY, 'Bob penalized -50 for omitting answer');
-  assert.equal(closed.scores.charlie, 300 + TIMEOUT_PENALTY, 'Charlie penalized -50 for omitting answer');
+  assert.equal(
+    closed.scores.charlie,
+    300 + TIMEOUT_PENALTY,
+    'Charlie penalized -50 for omitting answer',
+  );
 
   assert.equal(closed.answers[0].bob.timedOut, true);
   assert.equal(closed.answers[0].bob.pointsAwarded, TIMEOUT_PENALTY);

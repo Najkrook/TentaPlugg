@@ -155,7 +155,7 @@ export function multiplayerView(ctx) {
       const roundExpired =
         game.status === 'playing' &&
         ((game.firstAnswerAt && now > game.firstAnswerAt + ROUND_TIME_MS) ||
-         (game.roundStartTime && now > game.roundStartTime + 60000));
+          (game.roundStartTime && now > game.roundStartTime + 60000));
       const pauseExpired = game.status === 'round_end' && now >= game.nextRoundAt;
       // Host triggers advance immediately; guests only act as a safety fallback (+4s delay)
       const due =
@@ -465,7 +465,10 @@ function lobbyBrowserView(ctx) {
                                     : lobby.category === 'vocab'
                                       ? 'Vokabulär'
                                       : 'Ordföljd';
-                                const count = lobby.playerCount || Object.keys(lobby.players || {}).length || (lobby.guest ? 2 : 1);
+                                const count =
+                                  lobby.playerCount ||
+                                  Object.keys(lobby.players || {}).length ||
+                                  (lobby.guest ? 2 : 1);
                                 return html`
                                   <li class="lobby-item">
                                     <div class="lobby-info">
@@ -479,7 +482,9 @@ function lobbyBrowserView(ctx) {
                                         }
                                       </div>
                                       <div>
-                                        <strong class="host-name">${lobby.host?.displayName || 'Värd'}</strong>
+                                        <strong class="host-name"
+                                          >${lobby.host?.displayName || 'Värd'}</strong
+                                        >
                                         <div class="lobby-tags">
                                           <span class="badge elo-badge"
                                             >${lobby.host?.elo || DEFAULT_ELO} ELO</span
@@ -569,7 +574,9 @@ function waitingRoomView(ctx) {
 
   const playersMap = currentLobbyData.players || {
     ...(currentLobbyData.host?.uid ? { [currentLobbyData.host.uid]: currentLobbyData.host } : {}),
-    ...(currentLobbyData.guest?.uid ? { [currentLobbyData.guest.uid]: currentLobbyData.guest } : {}),
+    ...(currentLobbyData.guest?.uid
+      ? { [currentLobbyData.guest.uid]: currentLobbyData.guest }
+      : {}),
   };
   const playersList = Object.values(playersMap);
   const count = playersList.length;
@@ -693,17 +700,20 @@ function arenaView(ctx) {
   const now = getSyncedNow();
   // Ready countdown ONLY applies to round 0 before the roundStartTime
   const isCountdown =
-    game.currentRoundIndex === 0 &&
-    Boolean(game.roundStartTime) &&
-    now < game.roundStartTime;
-  const countdownSec = Math.max(1, Math.min(3, Math.ceil(((game.roundStartTime || now) - now) / 1000)));
+    game.currentRoundIndex === 0 && Boolean(game.roundStartTime) && now < game.roundStartTime;
+  const countdownSec = Math.max(
+    1,
+    Math.min(3, Math.ceil(((game.roundStartTime || now) - now) / 1000)),
+  );
 
   const roundIdx = game.currentRoundIndex || 0;
   const currentQ = game.questions?.[roundIdx] || { prompt: '', choices: [] };
 
   const playersMap = currentLobbyData.players || {
     ...(currentLobbyData.host?.uid ? { [currentLobbyData.host.uid]: currentLobbyData.host } : {}),
-    ...(currentLobbyData.guest?.uid ? { [currentLobbyData.guest.uid]: currentLobbyData.guest } : {}),
+    ...(currentLobbyData.guest?.uid
+      ? { [currentLobbyData.guest.uid]: currentLobbyData.guest }
+      : {}),
   };
   const allPlayers = Object.values(playersMap);
   const activeUids = getActivePlayerUids(game);
@@ -760,7 +770,9 @@ function arenaView(ctx) {
         <div class="arena-round-indicator">
           <div class="round-status-row">
             <span class="round-badge">Fråga ${roundIdx + 1} / 10</span>
-            <span class="timer-countdown-badge ${hasFirstAnswer ? 'active-countdown' : 'waiting-answer'}">
+            <span
+              class="timer-countdown-badge ${hasFirstAnswer ? 'active-countdown' : 'waiting-answer'}"
+            >
               ${icon('Clock')} ${hasFirstAnswer ? `${remainingSec}s kvar` : 'Väntar på svar...'}
             </span>
             <span class="answered-badge ${answeredCount === totalPlayers ? 'all-answered' : ''}">
@@ -864,12 +876,10 @@ function arenaView(ctx) {
                     myAnswer?.isCorrect
                       ? roundWinnerUid === user?.uid
                         ? html`<strong class="winner-self"
-                            >${icon('Check')} Du var snabbast!
-                            (+${myAnswer.pointsAwarded}p)</strong
+                            >${icon('Check')} Du var snabbast! (+${myAnswer.pointsAwarded}p)</strong
                           >`
                         : html`<strong class="winner-self"
-                            >${icon('Check')} Rätt svar!
-                            (+${myAnswer.pointsAwarded}p)</strong
+                            >${icon('Check')} Rätt svar! (+${myAnswer.pointsAwarded}p)</strong
                           >`
                       : myAnswer?.timedOut || !myAnswer?.answer
                         ? html`<strong class="winner-opp"
@@ -933,7 +943,9 @@ function matchResultView(ctx) {
 
   const playersMap = currentLobbyData.players || {
     ...(currentLobbyData.host?.uid ? { [currentLobbyData.host.uid]: currentLobbyData.host } : {}),
-    ...(currentLobbyData.guest?.uid ? { [currentLobbyData.guest.uid]: currentLobbyData.guest } : {}),
+    ...(currentLobbyData.guest?.uid
+      ? { [currentLobbyData.guest.uid]: currentLobbyData.guest }
+      : {}),
   };
   const allPlayers = Object.values(playersMap);
 
@@ -1005,7 +1017,9 @@ function matchResultView(ctx) {
                       <div class="podium-player">
                         <span class="podium-medal">🥈</span>
                         <strong class="podium-name">${second.displayName}</strong>
-                        <span class="podium-score">${(second.score || 0).toLocaleString('sv-SE')}p</span>
+                        <span class="podium-score"
+                          >${(second.score || 0).toLocaleString('sv-SE')}p</span
+                        >
                       </div>
                       <div class="podium-bar bar-silver">#2</div>
                     </div>
@@ -1019,7 +1033,9 @@ function matchResultView(ctx) {
                       <div class="podium-player">
                         <span class="podium-medal">🥇</span>
                         <strong class="podium-name">${first.displayName}</strong>
-                        <span class="podium-score">${(first.score || 0).toLocaleString('sv-SE')}p</span>
+                        <span class="podium-score"
+                          >${(first.score || 0).toLocaleString('sv-SE')}p</span
+                        >
                       </div>
                       <div class="podium-bar bar-gold">#1</div>
                     </div>
@@ -1033,7 +1049,9 @@ function matchResultView(ctx) {
                       <div class="podium-player">
                         <span class="podium-medal">🥉</span>
                         <strong class="podium-name">${third.displayName}</strong>
-                        <span class="podium-score">${(third.score || 0).toLocaleString('sv-SE')}p</span>
+                        <span class="podium-score"
+                          >${(third.score || 0).toLocaleString('sv-SE')}p</span
+                        >
                       </div>
                       <div class="podium-bar bar-bronze">#3</div>
                     </div>

@@ -1,17 +1,17 @@
 # Progress — explorer_survey_2
 
-Last visited: 2026-10-04T18:53:15Z
-Status: Completed
+Last visited: 2026-10-06T08:40:00Z
+Status: Completed (Survey of Mascot, Audio, Dialogue, and Particles for R1, R2, R3)
 
-- [x] Initialized DISPATCH.md and BRIEFING.md
-- [x] Read ORIGINAL_REQUEST.md
-- [x] Locate SRS / Leitner scheduling logic and state storage
-- [x] Analyze due question calculation and filtering
-- [x] Inspect study room UI and session length configuration
-- [x] Analyze question grading and answer flow
-- [x] Design/evaluate self-rated difficulty (Igen, Svårt, Bra, Lätt) mapping to Leitner intervals/boxes
-- [x] Analyze backwards compatibility, migrations, and sync
-- [x] Document risks and edge cases
-- [x] Produce analysis.md and handoff.md
+- [x] Initialized DISPATCH.md and updated BRIEFING.md
+- [x] Read ORIGINAL_REQUEST.md (Ultra Kawaii update)
+- [x] Investigate existing Mascot architecture and rendering locations (study, results, etc.)
+- [x] Inspect `public/anime/` assets and how they are loaded/referenced
+- [x] Investigate audio system (sound feedback, sound manager, unmuted state, mute toggles)
+- [x] Investigate dialogue quotes, kaomojis, Swedish translations, and speech bubble state
+- [x] Investigate click burst particle effects implementation (coordinates, reduced-motion, DOM cleanup, performance)
+- [x] Review Classic mode hard-hiding rules and test requirements
+- [x] Write report.md
+- [x] Write handoff.md
 - [x] Update BRIEFING.md
-- [x] Report back to orchestrator
+- [x] Send completion message to parent

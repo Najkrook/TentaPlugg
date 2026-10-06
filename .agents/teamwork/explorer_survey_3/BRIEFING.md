@@ -1,7 +1,7 @@
-# BRIEFING — 2026-10-04T16:52:00Z
+# BRIEFING — 2026-10-06T08:42:00Z
 
 ## Mission
-Survey styling, themes, anime character integration, WCAG AA compliance, and build/test infrastructure for R3 in TentaPlugg.
+Survey Vocabulary (`/vocabulary`) and Particle (`/particles`) views, compare styling against existing study/exam/guide views, and examine test suite structure (`npm test` 109+ tests, test runner, format check) for R5 and verification requirements.
 
 ## 🔒 My Identity
 - Archetype: explorer
@@ -9,37 +9,39 @@ Survey styling, themes, anime character integration, WCAG AA compliance, and bui
 - Working directory: c:\Users\Najk\Documents\ChatGPT\TentaPlugg\.agents\teamwork\explorer_survey_3
 - Original parent: caec6291-b7f4-4115-a415-2741cb85c00d
 - Milestone: survey
+- New Parent: 11adfdec-5f2b-4034-94ef-516c769b159f (Ultra Kawaii upgrade)
 
 ## 🔒 Key Constraints
 - Read-only investigation — do NOT implement or modify source code
 - Focus on R3: Sakura Anime Vibes-tema & figurer samt Bygg/Test-infrastruktur
 - Investigate theme switching, localStorage persistence, CSS/Tailwind variables, WCAG AA contrast, public/anime images, package.json, build and test setups
 - Document in analysis.md and handoff.md; keep progress.md updated
+- New Constraints: Focus on R5 (Theming for Vocabulary & Particle views) and Acceptance Criteria (npm test 109+ tests, build, format:check)
+- Read-only investigation — do NOT implement
 
 ## Current Parent
-- Conversation ID: caec6291-b7f4-4115-a415-2741cb85c00d
-- Updated: 2026-10-04T16:52:00Z
+- Conversation ID: 11adfdec-5f2b-4034-94ef-516c769b159f
+- Updated: 2026-10-06T08:42:00Z
 
 ## Investigation State
-- **Explored paths**: `src/style.css`, `src/main.js`, `src/views/home.js`, `src/views/session.js`, `src/views/exams.js`, `src/views/progress.js`, `src/views/guide.js`, `public/anime/`, `package.json`, `tests/*.test.js`, `playwright.config.js`.
+- **Explored paths**: `src/main.js`, `src/style.css`, `src/vocabulary-data.js`, `src/particles.js`, `src/views/particles.js`, `src/views/exams.js`, `src/views/guide.js`, `src/views/progress.js`, `src/views/session.js`, `src/views/home.js`, `package.json`, `tests/*.test.js`, `test/requirements.test.js`.
 - **Key findings**:
-  - `npm test` runs 24 unit tests via `node:test` in 102ms, all passing.
-  - `npm run build` uses Vite 7 and builds cleanly in ~1.9s, copying `public/anime/` to `dist/anime/`.
-  - Stilmall är ren vanilla CSS utan Tailwind. Teman implementeras via semantiska variabler på `:root` och `[data-theme="sakura"]`.
-  - WCAG AA uppfylls genom djup plommon/vinröd text (`#3b1d28`, kontrast > 14:1) mot pastellbakgrunder och djup körsbärsrosa (`#b82763`, kontrast > 5.8:1) för knappar.
-  - Figurerna från `public/anime/` (`study.jpg`, `cheer.jpg`, `encourage.jpg`) har analyserats och mappats till studierummet, Yatta/lyckade svar, och feluppmuntran/resultatpanel.
-  - Döljning av anime-figurer i Klassiskt läge säkras via både Lit-template-villkor och CSS `:root:not([data-theme="sakura"]) .anime-figure { display: none !important; }`.
-  - Temaväxlare sparas i `localStorage.getItem('tentaplugg-theme')` och appliceras omedelbart på `document.documentElement.dataset.theme`.
-- **Unexplored areas**: None for R3 survey scope.
+  - `npm test` runs 109 unit tests in ~1.1s via Node built-in `node:test` (`--test-isolation=none`), 0 failures. No Vitest/Jest.
+  - `npm run build` succeeds (code 0 in ~3.9s).
+  - `npm run format:check` currently fails with code 1 due to 6 unformatted files; `npm run format` needed during implementation.
+  - Route paths `/vocabulary` and `/particles` do not yet exist in `src/main.js`. Dedicated views `vocabularyView` and `particlesView` should be added.
+  - Existing Sakura cards in `exams.js`, `guide.js`, `progress.js`, and `session.js` follow a consistent pattern: `.anime-figure` wrapper, 85x85px image, dashed border `2px dashed #f472b6`, pastel gradient, omamori pill badges, and Japanese/Swedish speech bubbles.
+  - Hard-hiding rule in `src/style.css:2494-2508` enforces `display: none !important` outside Sakura mode.
+- **Unexplored areas**: None for this survey scope.
 
 ## Key Decisions Made
-- Kartlagt fullständig färgpalett med WCAG AA-beräkningar.
-- Specificerat integration för samtliga tre anime-bilder.
-- Dokumenterat analys och handoff.
+- Mapped architectural design for `/vocabulary` (using `encourage.jpg` and Genki dataset) and `/particles` (using `mascot_peek.jpg`/`study.jpg`).
+- Identified exact Prettier formatting requirement to ensure green verification.
+- Documented findings in `report.md` and `handoff.md`.
 
 ## Artifact Index
 - DISPATCH.md — record of orchestrator instructions
 - BRIEFING.md — working memory and identity
 - progress.md — liveness heartbeat
-- analysis.md — deep-dive survey report
+- report.md — comprehensive survey report
 - handoff.md — structured handoff

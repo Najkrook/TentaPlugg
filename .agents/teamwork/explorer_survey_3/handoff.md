@@ -1,135 +1,159 @@
-# Handoff Report: R3 Sakura Anime Vibes-tema & figurer samt Bygg/Test-infrastruktur
-
-**Agent:** `explorer_survey_3`  
-**Datum:** 2026-10-04  
-**Arbetsyta:** `c:\Users\Najk\Documents\ChatGPT\TentaPlugg\.agents\teamwork\explorer_survey_3`  
-**Typ:** Hard handoff (uppgift slutförd)  
-
----
+# Handoff Report — Explorer Survey 3: Views Theming & Verification Infrastructure
 
 ## 1. Observation
-
-1. **Testsvit:**
-   - Körning: `npm test`
-   - Utfall:
+1. **Test Runner & Existing Test Count**:
+   - `package.json:9`: `"test": "node --test --test-isolation=none tests/*.test.js"`.
+   - Execution of `npm test`:
      ```
-     > tentaplugg-japanska@1.0.0 test
-     > node --test --test-isolation=none tests/*.test.js
-
-     ✔ Japanese width and punctuation do not reject valid answers; long vowels remain meaningful (0.9613ms)
-     ✔ repetition prioritizes due over unseen and excludes future questions (10.5199ms)
-     ✔ all question ids unique and every auto question has an answer (0.3629ms)
-     ✔ all exams total 100 points and every original page exists (5.0322ms)
-     ✔ cloud merge keeps latest answers, results and exam drafts (0.8447ms)
-     ✔ Leitner advances only when due and not twice on one Stockholm day (0.4941ms)
-     ✔ Stockholm calendar and DST determine day boundaries (0.2132ms)
-     ✔ regrading is one review, reopening a result does not create reviews (1.7402ms)
-     ✔ migration preserves attempts/history/drafts and derives dueAt from historical time (0.3578ms)
-     ✔ merging independent devices preserves both reviews; corrected review wins (1.0435ms)
-     ✔ import is idempotent, keeps account date and guest original (0.4436ms)
-     ✔ daily plan is stable, excludes kana, has bounded tasks and carries completion between devices (37.2599ms)
-     ✔ last three days prioritise actual exam errors and past dates still have a plan (16.855ms)
-     ✔ tentas keep points, pending and unanswered separate; error practice cannot edit source (0.9398ms)
-     ✔ exactly 142 kana and 24 each extra sound and word-order questions (0.1353ms)
-     ✔ independent self-assessments in one attempt merge without losing points (1.1623ms)
-     ✔ guest import preserves two different unfinished attempts for the same exam (0.2663ms)
-     ✔ speech extracts only Japanese and drops Swedish/parenthesised notes (0.2597ms)
-     ✔ answer speech fills the blank with the correct particle, × means nothing (0.2178ms)
-     ✔ every question with Japanese gets something sensible to read (1.2018ms)
-     ✔ typing is debounced at 300 ms, flush preserves the last character (0.2336ms)
-     ✔ failed local writes remain retryable and corrupt originals are never overwritten on read (0.4315ms)
-     ✔ old account request cannot report success into new account (0.3381ms)
-     ✔ failed cloud write remains queued and newer edits are preserved (0.2234ms)
-     ℹ tests 24
+     ✔ Empirical Stress M3-6: CSS hard-hiding rules and theme selector verification (0.818ms)
+     ℹ tests 109
      ℹ suites 0
-     ℹ pass 24
+     ℹ pass 109
      ℹ fail 0
      ℹ cancelled 0
      ℹ skipped 0
      ℹ todo 0
-     ℹ duration_ms 102.84
+     ℹ duration_ms 1099.7647
      ```
-2. **Bygginfrastruktur:**
-   - Körning: `npm run build`
-   - Utfall: `vite v7.3.6 building client environment for production... built in 1.89s` med utfiler i `dist/`.
-   - `dist/anime/` genereras automatiskt innehållande `cheer.jpg`, `encourage.jpg` och `study.jpg` via Vites statiska filkopiering från `public/`.
-3. **CSS-arkitektur:**
-   - Fil: `src/style.css` (1758 rader).
-   - Rader 2–11:
-     ```css
-     :root {
-       font-family: 'DM Sans', 'Noto Sans JP', sans-serif;
-       color: #243e36;
-       background: #f8faf8;
-       font-synthesis: none;
-       --green: #183f37;
-       --lime: #d7f296;
-       --muted: #6d7d76;
-       --line: #dfe6e0;
+     Exit code: `0`. There are exactly 109 unit tests across 16 test files in `tests/`, running via Node's native `node:test` without Vitest or Jest.
+2. **Build Execution**:
+   - `package.json:8`: `"build": "vite build"`.
+   - Execution of `npm run build`:
+     ```
+     vite v7.3.6 building client environment for production...
+     transforming...
+     ✓ 1601 modules transformed.
+     rendering chunks...
+     dist/index.html                     1.63 kB │ gzip:   0.72 kB
+     dist/assets/index-DNOj0OGZ.css     74.45 kB │ gzip:  15.08 kB
+     dist/assets/index-CRdltJX7.js     247.39 kB │ gzip:  77.17 kB
+     dist/assets/firebase-DvpDwDg2.js  545.49 kB │ gzip: 162.06 kB
+     ✓ built in 3.89s
+     ```
+     Exit code: `0`.
+3. **Format Check Execution**:
+   - `package.json:12`: `"format:check": "prettier --check ."`.
+   - Execution of `npm run format:check`:
+     ```
+     Checking formatting...
+     [warn] src/main.js
+     [warn] src/multiplayer.js
+     [warn] src/style.css
+     [warn] src/views/multiplayer.js
+     [warn] tests/audio.test.js
+     [warn] tests/multiplayer.test.js
+     Code style issues found in 6 files. Run Prettier with --write to fix.
+     ```
+     Exit code: `1`. Prettier detected unformatted syntax in 6 pre-existing repository files.
+4. **Current Views and Routing in `src/main.js`**:
+   - Line 48: `let view = 'home';`
+   - Lines 266-276:
+     ```javascript
+     const body = session
+       ? sessionView(ctx)
+       : view === 'home'
+         ? homeView(ctx)
+         : view === 'exams'
+           ? examsView(ctx)
+           : view === 'multiplayer'
+             ? multiplayerView(ctx)
+             : view === 'progress'
+               ? progressView(ctx)
+               : guideView(ctx);
+     ```
+   - Lines 484-492:
+     ```javascript
+     function navigate(id) {
+       flush();
+       if (view === 'multiplayer' && id !== 'multiplayer') {
+         resetMultiplayerView(user?.uid);
+       }
+       session = null;
+       view = id;
+       render(true);
      }
      ```
-   - Inga externa CSS-ramverk (Tailwind saknas i `package.json` och `index.html`). All styling är ren CSS.
-4. **Bildtillgångar i `public/anime/`:**
-   - `public/anime/study.jpg` (524 717 bytes): Skolflicka i sjömanskrage med pensel, japansk bok (`あ い う え お`), sakura-blommor.
-   - `public/anime/cheer.jpg` (638 920 bytes): Firande flicka med "やった！"-text, stjärnor, konfetti.
-   - `public/anime/encourage.jpg` (552 198 bytes): Flicka med uchiwa-solfjäder med "がんばって！"-text och knuten näve.
-5. **Applikationslayout och vyer:**
-   - `src/main.js`: Renderar `.sidebar` (rader 177–200), `.topbar` med konto-knapp (rader 202–210), `<main>` (rad 211), `footer` (rad 212), `.mobile-nav` (rad 214–216).
-   - `src/views/home.js`: Rader 24–44 innehåller `.focus-panel` med `.particle-art`.
-   - `src/views/session.js`: Rader 90–115 innehåller `.feedback` med klasserna `.good` och `.again`. Rader 123–160 innehåller `resultView` med `.result-panel`.
+   - Routes `/vocabulary` and `/particles` are not yet wired into `main.js`.
+5. **Vocabulary and Particle Datasets**:
+   - `src/vocabulary-data.js`: Exports `kanjiList` (43 kanji, 180 compounds) and `vocabularyList` (170+ words across lessons 3, 4, 5). Currently only imported in `src/multiplayer.js:15`.
+   - `src/particles.js`: Contains particle definitions and reduction logic.
+   - `src/views/particles.js`: Only exports `particleSessionView(ctx, q, ratings)`. There is currently no top-level view for `/particles`.
+6. **Existing Kawaii Cards and CSS Hard-Hiding Rules**:
+   - `src/views/exams.js:8-18` & `src/style.css:3653-3705`: `.anime-figure.exam-anime-banner-card` with `mascot_cheer.jpg`, `.exam-anime-omamori`, `h3`, `p`.
+   - `src/views/guide.js:101-114` & `src/style.css:3761-3829`: `.anime-figure.guide-anime-hero-card` with `mascot_peek.jpg`, `.guide-anime-bubble`, `.guide-anime-tag`.
+   - `src/views/progress.js:21-34` & `src/style.css:3707-3759`: `.anime-figure.progress-anime-hero-card` with `.progress-rank-badge`.
+   - `src/style.css:2494-2508`:
+     ```css
+     :root:not([data-theme='sakura']) .anime-figure,
+     html:not([data-theme='sakura']) .anime-figure,
+     [data-theme='classic'] .anime-figure,
+     :root:not([data-theme='sakura']) .sound-toggle,
+     ... {
+       display: none !important;
+     }
+     ```
+     Verified by `tests/stress_m3.test.js:250-265`.
 
 ---
 
 ## 2. Logic Chain
-
-1. **Från CSS-strukturen (Observation 3):** Eftersom appen styrs av `:root`-variabler och ren CSS kan ett fullständigt tema skapas genom att lägga till variabler för bakgrund, kort, text, accenter och fokus på `:root` och skriva över dem under `[data-theme="sakura"]`.
-2. **Från Tillgänglighetsberäkningar:** För att uppfylla WCAG AA krävs kontrast ≥ 4.5:1 mot bakgrunden. Ljusa pastellfärger som bakgrund (`#fff5f8`) medger inte ljusrosa text. Genom att använda djup plommon/vinröd text (`#3b1d28`, kontrast 14.2:1) och djup körsbärsrosa för knappar (`#b82763`, kontrast 5.8:1 mot vitt) garanteras WCAG AA samtidigt som den genuina Sakura-känslan uppnås.
-3. **Från Bildanalys (Observation 4) till UI-placering (Observation 5):**
-   - `study.jpg` matchar studierummet och passar direkt i `.focus-panel` i `views/home.js`.
-   - `cheer.jpg` har explicit japansk text "やった！" och matchar lyckat svar (`s.grades[q.id] === true`) samt slutresultat vid godkänt pass.
-   - `encourage.jpg` har texten "がんばって！" och matchar felaktigt svar (`s.grades[q.id] === false`) samt uppmuntran vid repetition.
-4. **Från Döljningskravet till Implementationsstrategi:** För att säkerställa att anime-figurerna döljs till 100 % i Klassiskt läge appliceras dubbla skydd: Lit-html exkluderar `<img>`-noderna helt vid `theme !== 'sakura'`, och CSS sätter `display: none !important` via `:root:not([data-theme="sakura"]) .anime-figure`.
-5. **Från Bygg- och Testresultat (Observation 1 & 2):** Infrastrukturen fungerar felfritt. `dist/anime` skapas automatiskt vid `npm run build`. Att implementera R3 kräver inga nya externa beroenden i `package.json`, vilket minimerar risken för byggfel.
+1. **Need for dedicated views**: The acceptance criteria explicitly state:
+   *"The Vocabulary view (`/vocabulary`) and Particle view (`/particles`) render dedicated kawaii banner/encouragement cards when Sakura mode is active."*
+   Based on Observation 4 and 5, neither route currently exists in `main.js`. Therefore, the implementer must:
+   - Add path synchronization in `src/main.js` (reading `window.location.pathname` and calling `history.pushState`).
+   - Create `src/views/vocabulary.js` rendering `vocabularyView(ctx)` using data from `src/vocabulary-data.js`.
+   - Extend `src/views/particles.js` to export a top-level `particlesView(ctx)` for the standalone `/particles` route.
+2. **Visual Consistency**:
+   From Observation 6, existing banner cards follow an identical design architecture:
+   - Container with class `.anime-figure` and a view-specific modifier (e.g. `.vocab-anime-banner-card`, `.particle-anime-banner-card`).
+   - 85x85px anime mascot image (`/anime/encourage.jpg` for vocabulary, `/anime/mascot_peek.jpg` or `study.jpg` for particles).
+   - Pill badge with omamori / Sakura styling (`border-radius: 9999px`, `#ffffff` background, pink border).
+   - Joyful Japanese speech bubble (`.kawaii-speech-bubble` or inner bubble) with encouraging Swedish text.
+   - Pastel background gradient with `2px dashed #f472b6` border and `border-radius: 20px`.
+3. **Hard-Hiding Enforcement**:
+   From Observation 6, `tests/stress_m3.test.js` enforces the presence of `:root:not([data-theme='sakura']) .anime-figure { display: none !important; }`. Conditioning with `${ctx.theme === 'sakura' ? html`...` : ''}` ensures elements are omitted from the DOM in Classic mode, and the `.anime-figure` CSS class provides defense-in-depth against accidental visual leaks in Classic mode.
+4. **Verification Gate**:
+   From Observation 1, 2, and 3:
+   - `npm test` has 109 tests passing; any additions must maintain 0 failures and 0 regressions.
+   - `npm run build` is healthy and builds in ~3.9s.
+   - `npm run format:check` currently fails due to 6 unformatted files. Running `npm run format` is mandatory before final verification to meet acceptance criteria.
 
 ---
 
 ## 3. Caveats
-
-- **Inga källkodsändringar utförda:** I enlighet med rollen som Explorer är denna undersökning strikt läsande.
-- **E2E-tester:** `npm run test:e2e` (Playwright) förutsätter en lokal devserver eller emulerad miljö. Enhetstesterna i `npm test` körs dock isolerat och blixtsnabbt i Node.js.
-- **Eventuell överlappning med R1/R2:** Implementatören måste vara uppmärksam på att `src/views/session.js` berörs av alla tre kraven (R1: kontrastiv feedback & snabbguide, R2: 4-stegs svårighetsgradering, R3: anime-figurer i feedback). Tydlig modulär separation i Lit-templates förhindrar krockar.
+- **Read-Only Scope**: Explorer 3 performed read-only investigations; no source files were modified. The formatting failure in `npm run format:check` was observed on pre-existing code and must be fixed during the implementation phase.
+- **URL Routing Strategy**: While browser pathname routing (`/vocabulary`, `/particles`) can be managed with `history.pushState` and `window.location.pathname`, Vite's dev server and preview server natively fallback to `index.html` for single-page applications. No custom server configuration is needed.
 
 ---
 
 ## 4. Conclusion
-
-Förutsättningarna för att implementera **R3: Sakura Anime Vibes-tema & figurer** är optimala:
-1. Temaväxlingen kan implementeras enkelt och elegant genom att läsa/skriva `localStorage.getItem('tentaplugg-theme')` och sätta attributet `data-theme` på `document.documentElement`.
-2. Temaväxlarknappen (🌸 Sakura Anime / 🎓 Klassisk) placeras synligt i `.topbar` och `.sidebar`.
-3. De tre anime-figurerna passar perfekt in i befintliga vyer: `study.jpg` i studierummet, `cheer.jpg` vid lyckade svar / "Yatta!" och i resultatpanelen, samt `encourage.jpg` vid felaktiga svar och repetition.
-4. Båda temana klarar WCAG AA med god marginal tack vare vald färgpalett.
-5. Alla 24 enhetstester fortsätter att passera och bygget fungerar klanderfritt.
+The path to satisfying Requirement R5 and all testing/build acceptance criteria is clear:
+1. Implement client-side path handling in `src/main.js` for `/vocabulary` and `/particles`.
+2. Create `src/views/vocabulary.js` and extend `src/views/particles.js` to render dedicated views with `.anime-figure` banner cards in Sakura mode.
+3. Style the cards in `src/style.css` using the established pastel gradient, omamori pill badge, and dashed border pattern (`encourage.jpg` for vocabulary, `mascot_peek.jpg` for particles).
+4. Add automated tests in `tests/` asserting that `/vocabulary` and `/particles` render banner cards in Sakura mode and omit them in Classic mode.
+5. Execute `npm run format` to clean up Prettier violations across the 6 flagged files, ensuring `npm run format:check`, `npm test`, and `npm run build` all exit 0.
 
 ---
 
 ## 5. Verification Method
-
-Oberoende verifiering kan utföras med följande kommandon:
-
-1. **Testsvit:**
-   ```bash
+To independently verify these findings:
+1. **Run Unit Tests**:
+   ```powershell
    npm test
    ```
-   *Förväntat resultat:* 24 passerade enhetstester, 0 fel.
-
-2. **Produktionsbygge:**
-   ```bash
+   *Expected*: Passes 109 tests with 0 failures in ~1.1s.
+2. **Run Build**:
+   ```powershell
    npm run build
    ```
-   *Förväntat resultat:* Exit code 0, `dist/` skapas, `dist/anime/` innehåller `cheer.jpg`, `encourage.jpg` och `study.jpg`.
-
-3. **Visuell & Kontrastgranskning vid implementering:**
-   - Inspektera `src/style.css` för semantiska variabler och `[data-theme="sakura"]`.
-   - Kontrollera att `document.documentElement.dataset.theme` växlar mellan `'classic'` och `'sakura'`.
-   - Kontrollera att `localStorage.getItem('tentaplugg-theme')` uppdateras och bevaras vid omladdning.
-   - Säkerställ att inga `.anime-figure`-element renderas eller visas när temat är `classic`.
+   *Expected*: Exits code 0 in ~4s.
+3. **Run Format Check**:
+   ```powershell
+   npm run format:check
+   ```
+   *Expected currently*: Exits code 1, flagging `src/main.js`, `src/multiplayer.js`, `src/style.css`, `src/views/multiplayer.js`, `tests/audio.test.js`, `tests/multiplayer.test.js`.
+4. **Inspect CSS Hard Hiding & Theme Selectors**:
+   Inspect `src/style.css:2494-2508` and verify against `tests/stress_m3.test.js:244-275`.
+5. **Inspect Existing Sakura Banner Cards**:
+   Inspect `src/views/exams.js:8-18` and `src/views/guide.js:101-114`.

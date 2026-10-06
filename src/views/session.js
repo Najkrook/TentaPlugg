@@ -20,6 +20,28 @@ export function previewRatingInterval(state, session, questionId, rating, now) {
   return formatInterval(previewReview(state, session, questionId, rating, now).dueAt - now);
 }
 
+export const RATING_KAOMOJI = {
+  again: '(｡•́︿•̀｡)',
+  hard: '(´-﹏-`；)',
+  good: '(o^▽^o)',
+  easy: '(★ω★)',
+};
+
+export const RATING_LABELS = {
+  again: 'Igen',
+  hard: 'Svårt',
+  good: 'Bra',
+  easy: 'Lätt',
+};
+
+export function formatRatingLabel(rating, theme) {
+  const clean = RATING_LABELS[rating] || rating;
+  if (theme === 'sakura' && RATING_KAOMOJI[rating]) {
+    return `${clean} ${RATING_KAOMOJI[rating]}`;
+  }
+  return clean;
+}
+
 export function sessionView(ctx) {
   const s = ctx.session;
   if (s.done) return resultView(ctx);
@@ -212,13 +234,14 @@ export function sessionView(ctx) {
             : ''
         }
         <div class="question-actions">
-          ${s.index > 0 ? html`<button class="secondary" @click=${() => ctx.jump(s.index - 1)}>Föregående</button>` : html`<span></span>`}${s.mode === 'exam' && !s.review ? html`<button class="primary" @click=${ctx.next}>${s.index === s.ids.length - 1 ? 'Lämna in tentan' : 'Nästa fråga'} ${icon('ChevronRight')}</button>` : !feedback ? html`<button class="primary" @click=${ctx.check}>${q.self ? 'Visa modellösning' : 'Kontrollera svar'} ${icon('Check')}</button>` : !q.self ? html`<button class="primary" @click=${ctx.next}>${s.index === s.ids.length - 1 ? 'Visa resultat' : 'Nästa fråga'} ${icon('ChevronRight')}</button>` : ''}
+          ${s.index > 0 ? html`<button class="secondary" @click=${() => ctx.jump(s.index - 1)}>Föregående</button>` : html`<span></span>`}${s.mode === 'exam' && !s.review ? html`<button class="primary" @click=${ctx.next}>${s.index === s.ids.length - 1 ? 'Lämna in tentan' : 'Nästa fråga'} ${icon('ChevronRight')}</button>` : !feedback ? html`<button class="primary" @click=${ctx.check}>${q.self ? 'Visa modellösning' : 'Kontrollera svar'}${ctx.theme === 'sakura' ? html` <span class="kaomoji" aria-hidden="true">✨</span>` : ''} ${icon('Check')}</button>` : !q.self ? html`<button class="primary" @click=${ctx.next}>${s.index === s.ids.length - 1 ? 'Visa resultat' : 'Nästa fråga'}${ctx.theme === 'sakura' ? html` <span class="kaomoji" aria-hidden="true">🌸</span>` : ''} ${icon('ChevronRight')}</button>` : ''}
         </div>
         ${s.mode === 'exam' ? html`<div class="question-jump">${s.ids.map((id, i) => html`<button class="${i === s.index ? 'current' : ''} ${s.answers[id] ? 'answered' : ''}" aria-label="Fråga ${i + 1}" aria-current=${i === s.index ? 'step' : 'false'} @click=${() => ctx.jump(i)}>${i + 1}</button>`)}</div>` : ''}
       </section>`,
     )}`;
 }
 function ratingButtonsTemplate(ctx, q, currentBox) {
+  const isSakura = ctx.theme === 'sakura';
   const ratings = [
     { key: '1', rating: 'again', label: 'Igen', cls: 'rating-again' },
     { key: '2', rating: 'hard', label: 'Svårt', cls: 'rating-hard' },
@@ -240,6 +263,7 @@ function ratingButtonsTemplate(ctx, q, currentBox) {
     <div class="rating-buttons">
       ${ratings.map(({ key, rating, label, cls }) => {
         const interval = previewRatingInterval(ctx.state, ctx.session, q.id, rating, ctx.now);
+        const kaomoji = RATING_KAOMOJI[rating];
         return html`<button
           type="button"
           class="rating-btn ${cls}"
@@ -249,7 +273,9 @@ function ratingButtonsTemplate(ctx, q, currentBox) {
           @click=${() => ctx.grade(rating, true)}
         >
           <kbd class="rating-key">${key}</kbd>
-          <span class="rating-label">${label}</span>
+          <span class="rating-label"
+            >${label}${isSakura && kaomoji ? html` <span class="kaomoji" aria-hidden="true">${kaomoji}</span>` : ''}</span
+          >
           <span class="rating-interval">${interval}</span>
         </button>`;
       })}

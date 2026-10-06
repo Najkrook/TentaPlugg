@@ -10,6 +10,7 @@ import {
   getSoundVolume,
   setSoundVolume,
   getEffectiveSoundVolume,
+  SOUND_FILES,
 } from '../src/audio.js';
 
 test('anime sound files exist on disk with valid file size (>10KB)', () => {
@@ -23,6 +24,14 @@ test('anime sound files exist on disk with valid file size (>10KB)', () => {
       `File ${sound} should be greater than 10KB (actual: ${stat.size})`,
     );
   }
+});
+
+test('SOUND_FILES correctly maps sound cues including ara_ara', () => {
+  assert.equal(SOUND_FILES.ara_ara, '/anime/sounds/ara_ara.mp3');
+  assert.equal(SOUND_FILES.tuturu, '/anime/sounds/tuturu.mp3');
+  assert.equal(SOUND_FILES.nani, '/anime/sounds/nani.mp3');
+  assert.equal(SOUND_FILES.wow, '/anime/sounds/wow.mp3');
+  assert.equal(SOUND_FILES.arigato, '/anime/sounds/arigato.mp3');
 });
 
 test('playAnimeSound strictly gates playback by theme (never plays in classic mode)', () => {
@@ -84,9 +93,8 @@ test('setSoundVolume correctly sets volume, handles percentages, and clamps boun
 
 test('CSS hard-hides sound-slider-wrapper and sound-slider outside Sakura mode', () => {
   const css = fs.readFileSync(path.resolve('src/style.css'), 'utf8');
-  assert.ok(css.includes(':root:not([data-theme=\'sakura\']) .sound-slider-wrapper'));
-  assert.ok(css.includes(':root:not([data-theme=\'sakura\']) .sound-slider'));
-  assert.ok(css.includes('[data-theme=\'classic\'] .sound-slider-wrapper'));
-  assert.ok(css.includes('[data-theme=\'classic\'] .sound-slider'));
+  assert.ok(css.includes(":root:not([data-theme='sakura']) .sound-slider-wrapper"));
+  assert.ok(css.includes(":root:not([data-theme='sakura']) .sound-slider"));
+  assert.ok(css.includes("[data-theme='classic'] .sound-slider-wrapper"));
+  assert.ok(css.includes("[data-theme='classic'] .sound-slider"));
 });
-

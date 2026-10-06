@@ -1,61 +1,70 @@
-# BRIEFING — 2026-10-04T18:05:00Z
+# BRIEFING — 2026-10-06T09:28:00Z
 
 ## Mission
-Implement Milestone M3: Sakura Anime Vibes theme, theme toggling & persistence, anime figure integration, and WCAG AA accessibility in TentaPlugg.
+Implement Milestone 3 (R5: Theming for Vocabulary and Particle Views) with cute pastel banner cards, kawaii tip callouts, badge styling consistent with study, exam, and guide views, route handling for /vocabulary and /particles, and strict Classic mode hard-hiding invariant.
 
 ## 🔒 My Identity
 - Archetype: worker
 - Roles: implementer, qa, specialist
 - Working directory: c:\Users\Najk\Documents\ChatGPT\TentaPlugg\.agents\teamwork\worker_m3
-- Original parent: caec6291-b7f4-4115-a415-2741cb85c00d
-- Milestone: M3 (R3: Sakura Anime Vibes-tema & figurer)
+- Original parent: 11adfdec-5f2b-4034-94ef-516c769b159f
+- Milestone: M3 (R5: Theming for Vocabulary and Particle Views)
 
 ## 🔒 Key Constraints
-- Exclusive write ownership of: src/style.css, src/main.js, src/views/home.js, src/views/session.js, index.html.
-- Do NOT edit other source files without coordination.
-- WCAG AA contrast ratio (>4.5:1 text, >=3:1 non-text/focus) in both themes.
-- Anime figures must be cleanly hidden in classic mode (:root:not([data-theme="sakura"]) .anime-figure, html:not([data-theme="sakura"]) .anime-figure { display: none !important; } and template logic).
-- Persist theme selection in localStorage under 'tentaplugg-theme'.
-- All tests must continue to pass cleanly, and npm run build must succeed.
-- No shortcuts, no fake/facade implementations.
+- Exclusive write ownership of: src/views/vocabulary.js, src/views/particles.js, src/main.js, src/style.css, tests/views_theming.test.js.
+- Ensure strict Classic mode hard-hiding invariant (zero anime figures or banners visible in DOM/viewport).
+- In Sakura mode: dedicated kawaii banner cards with class .anime-figure.vocab-anime-banner-card and .anime-figure.particle-anime-banner-card.
+- DO NOT modify lines 2495–2508 in src/style.css (hard-hiding CSS rule).
+- All 149+ tests must pass with 0 regressions, build must succeed, and prettier formatting check must pass.
+- Genuine implementation only: DO NOT cheat, no hardcoded test results or dummy facades.
 
 ## Current Parent
-- Conversation ID: caec6291-b7f4-4115-a415-2741cb85c00d
-- Updated: 2026-10-04T18:05:00Z
+- Conversation ID: 11adfdec-5f2b-4034-94ef-516c769b159f
+- Updated: 2026-10-06T09:28:00Z
 
 ## Task Summary
-- **What to build**: Full Sakura Anime Vibes theme in CSS, theme toggle in topbar & sidebar, persistence in localStorage, integration of study.jpg, cheer.jpg, encourage.jpg in home and session views, focus outline accessibility.
-- **Success criteria**: Theme toggles cleanly, state persists, anime figures display in sakura mode and hide in classic mode, WCAG AA compliance, all tests pass, build passes.
-- **Interface contracts**: PROJECT.md Theme Contract (dataset.theme, 'tentaplugg-theme', .anime-figure hiding).
-- **Code layout**: src/style.css, src/main.js, src/views/home.js, src/views/session.js, index.html.
+- **What to build**:
+  1. Route & view wiring in `src/main.js` for `/vocabulary` and `/particles` and views `vocabularyView(ctx)`, `particlesView(ctx)`.
+  2. Create `src/views/vocabulary.js` with Genki I vocabulary & kanji data browser, search, filters, and kawaii banner card + tip callout in Sakura mode.
+  3. Update `src/views/particles.js` to export top-level `particlesView(ctx)` with particle guide & drill launcher, kawaii banner card + tip callout in Sakura mode.
+  4. Styles in `src/style.css` for `.vocab-anime-banner-card`, `.particle-anime-banner-card`, tip callouts, and word-type chips.
+  5. Automated tests in `tests/views_theming.test.js`.
+  6. Verify build, all tests, and Prettier formatting.
+- **Success criteria**:
+  - Sakura mode renders dedicated kawaii banner cards and tip callouts.
+  - Classic mode completely omits all anime figures and cards (0 DOM nodes, CSS hidden).
+  - Browser paths `/vocabulary` and `/particles` display the views.
+  - All unit tests pass (149/149), build passes, prettier format check passes.
+- **Interface contracts**: PROJECT.md & DISPATCH.md.
+- **Code layout**: `src/views/vocabulary.js`, `src/views/particles.js`, `src/main.js`, `src/style.css`, `tests/views_theming.test.js`.
+
+## Key Decisions Made
+- Used `renderTemplateToString` pattern in tests to verify both HTML structure and omission in Classic mode.
+- In `main.js`, check `window.location.pathname` on boot and handle `popstate` for clean history integration.
+- Strictly applied `.anime-figure` class to all banner cards so CSS hard-hiding guarantees protection even if template logic fails.
+- Provided comprehensive Genki I vocabulary filtering and particle reference cards in the respective views.
 
 ## Change Tracker
 - **Files modified**:
-  - `index.html`: Early head script preventing FOUT by applying stored theme before paint.
-  - `src/style.css`: Sakura Anime Vibes theme under `[data-theme="sakura"]`, `--focus-ring` (WCAG 1.4.11 >=3:1), anime figure styling, and hard hiding rule outside Sakura mode.
-  - `src/main.js`: Theme persistence via `localStorage.getItem('tentaplugg-theme')`, `toggleTheme()`, `setTheme()`, exposed on `ctx`, topbar & sidebar theme toggle buttons.
-  - `src/views/home.js`: Render `study.jpg` with `.anime-figure` class in `.focus-panel` in Sakura mode.
-  - `src/views/session.js`: Render `cheer.jpg` upon good feedback and in `resultView`, and `encourage.jpg` upon again feedback in Sakura mode; omitted in classic mode.
-- **Build status**: Passing (`npm test` 61 pass in 148ms, `npm run build` exit code 0).
+  - `src/main.js`: Wired `/vocabulary` and `/particles` routes, views, pushState, and popstate listener.
+  - `src/views/vocabulary.js`: Created vocabulary and kanji browser with Sakura kawaii banner and tip callout.
+  - `src/views/particles.js`: Added `particlesView(ctx)` with Sakura kawaii banner, tip callout, and 10 canonical particles.
+  - `src/style.css`: Added banner cards, badges, tip callouts, and card styles; kept lines 2495-2511 untouched.
+  - `tests/views_theming.test.js`: Created 8 comprehensive automated unit tests.
+- **Build status**: Passing (`npm test` 149 pass in ~1.25s, `npm run build` exit code 0, `npm run format:check` exit code 0).
 - **Pending issues**: None.
 
 ## Quality Status
-- **Build/test result**: Passing (61 pass, 0 fail).
-- **Lint status**: Clean.
-- **Tests added/modified**: Verified all Tier 1-4 tests in requirements suite and created verification harness in agent workspace.
+- **Build/test result**: Passing (149 pass, 0 fail).
+- **Lint status**: Clean (all files formatted with Prettier).
+- **Tests added/modified**: `tests/views_theming.test.js` added.
 
 ## Loaded Skills
 - None specified.
-
-## Key Decisions Made
-- Used semantic CSS variables for the themes so styling is uniform, clean, and extensible.
-- Ensured text contrast in Sakura mode uses deep wine/plum `#3b1d28` on pastel `#fff5f8`/`#ffffff`, exceeding WCAG AA (>14:1).
-- Used dual hiding for anime figures: conditional rendering in templates and strict CSS `display: none !important` rule when not in sakura mode.
-- Prevented FOUT by adding inline script in index.html to apply stored theme before initial paint.
 
 ## Artifact Index
 - DISPATCH.md — Assignment instructions
 - BRIEFING.md — Situational awareness
 - progress.md — Liveness heartbeat & task progress
-- verify.js — Automated static verification script
+- report.md — Full implementation report
 - handoff.md — Final handoff report

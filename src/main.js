@@ -32,6 +32,8 @@ import { progressView } from './views/progress.js';
 import { guideView, guideModalTemplate, resolveGuideId } from './views/guide.js';
 import { sessionView } from './views/session.js';
 import { multiplayerView, resetMultiplayerView } from './views/multiplayer.js';
+import { vocabularyView } from './views/vocabulary.js';
+import { particlesView } from './views/particles.js';
 import { icon, dateText } from './views/shared.js';
 import {
   playAnimeSound,
@@ -41,12 +43,34 @@ import {
   getSoundVolume,
   setSoundVolume,
 } from './audio.js';
+import {
+  getStudyMascotQuote,
+  getSidebarMascotQuote,
+  pokeStudyMascot,
+  pokeSidebarMascot,
+} from './mascot-dialogue.js';
+import { initClickParticles, purgeParticles } from './particles-fx.js';
 const app = document.querySelector('#app');
+const KNOWN_VIEWS = [
+  'home',
+  'vocabulary',
+  'particles',
+  'exams',
+  'multiplayer',
+  'progress',
+  'guide',
+];
 let user = null,
   state = fresh(),
   session = null,
   view = 'home',
   status = 'Sparas på den här enheten';
+if (typeof window !== 'undefined' && window.location?.pathname) {
+  const initPath = window.location.pathname.replace(/^\/+/, '').split('/')[0];
+  if (KNOWN_VIEWS.includes(initPath)) {
+    view = initPath;
+  }
+}
 let saver,
   sync,
   accountEpoch = 0,
@@ -81,6 +105,9 @@ function applyTheme(t) {
     const meta = document.querySelector('meta[name="theme-color"]');
     if (meta) {
       meta.setAttribute('content', effective === 'sakura' ? '#a82e66' : '#183f37');
+    }
+    if (effective !== 'sakura') {
+      purgeParticles();
     }
   }
 }
@@ -252,6 +279,19 @@ function getCtx() {
     },
     speak: speakText,
     account,
+    getStudyMascotQuote,
+    getSidebarMascotQuote,
+    pokeStudyMascot: () => {
+      const q = pokeStudyMascot(state.theme);
+      render();
+      return q;
+    },
+    pokeSidebarMascot: () => {
+      const q = pokeSidebarMascot(state.theme);
+      render();
+      return q;
+    },
+    view,
     render: () => render(),
   };
 }
@@ -273,7 +313,11 @@ function render(focus = false) {
           ? multiplayerView(ctx)
           : view === 'progress'
             ? progressView(ctx)
-            : guideView(ctx);
+            : view === 'vocabulary'
+              ? vocabularyView(ctx)
+              : view === 'particles'
+                ? particlesView(ctx)
+                : guideView(ctx);
   renderTemplate(
     html`<aside class="sidebar">
         <a
@@ -289,6 +333,50 @@ function render(focus = false) {
         <nav>
           ${navs.map(([id, i, label]) => html`<button class="nav-item ${view === id ? 'active' : ''}" @click=${() => navigate(id)}>${icon(i)}<span>${label}</span></button>`)}
         </nav>
+        <div class="sidebar-study-links" role="group" aria-label="Referensmaterial">
+          <button
+            class="nav-item sub-nav-item ${view === 'vocabulary' ? 'active' : ''}"
+            @click=${() => navigate('vocabulary')}
+          >
+            ${icon('BookOpen')}<span>Ordförråd (Genki)</span>
+          </button>
+          <button
+            class="nav-item sub-nav-item ${view === 'particles' ? 'active' : ''}"
+            @click=${() => navigate('particles')}
+          >
+            ${icon('CircleHelp')}<span>Partikelguide</span>
+          </button>
+        </div>
+        ${
+          state.theme === 'sakura'
+            ? html`<div
+                class="anime-figure sidebar-chibi-card"
+                role="button"
+                tabindex="0"
+                aria-label="Klicka på maskoten för att prata"
+                title="Klicka på mig! ✨"
+                @click=${() => {
+                  pokeSidebarMascot(state.theme);
+                  render();
+                }}
+                @keydown=${(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    pokeSidebarMascot(state.theme);
+                    render();
+                  }
+                }}
+              >
+                <div class="sidebar-chibi-img-wrap">
+                  <img src="/anime/mascot_peek.jpg" alt="Peeking chibi maskot" loading="lazy" />
+                </div>
+                <div class="sidebar-chibi-bubble" aria-live="polite">
+                  <strong>${getSidebarMascotQuote().jp}</strong>
+                  <p>${getSidebarMascotQuote().kaomoji} ${getSidebarMascotQuote().sv}</p>
+                </div>
+              </div>`
+            : ''
+        }
         <div class="side-bottom">
           <button
             type="button"
@@ -319,35 +407,37 @@ function render(focus = false) {
             ${
               state.theme === 'sakura'
                 ? html`<button
-                    type="button"
-                    class="theme-toggle sound-toggle"
-                    @click=${toggleMute}
-                    title=${isSoundMuted() || getSoundVolume() === 0 ? 'Slå på anime-ljud' : 'Stäng av anime-ljud'}
-                    aria-label=${isSoundMuted() || getSoundVolume() === 0 ? 'Slå på anime-ljud' : 'Stäng av anime-ljud'}
-                  >
-                    <span class="theme-icon" aria-hidden="true"
-                      >${isSoundMuted() || getSoundVolume() === 0 ? '🔇' : '🔊'}</span
+                      type="button"
+                      class="theme-toggle sound-toggle"
+                      @click=${toggleMute}
+                      title=${isSoundMuted() || getSoundVolume() === 0 ? 'Slå på anime-ljud' : 'Stäng av anime-ljud'}
+                      aria-label=${isSoundMuted() || getSoundVolume() === 0 ? 'Slå på anime-ljud' : 'Stäng av anime-ljud'}
                     >
-                    <span class="sound-label">${isSoundMuted() || getSoundVolume() === 0 ? 'Tyst' : 'Ljud'}</span>
-                  </button>
-                  <div
-                    class="sound-slider-wrapper"
-                    title="Anime-ljud: ${Math.round(getSoundVolume() * 100)}%"
-                  >
-                    <span class="sound-slider-icon" aria-hidden="true">🌸</span>
-                    <input
-                      type="range"
-                      class="sound-slider"
-                      min="0"
-                      max="100"
-                      step="5"
-                      .value=${String(Math.round(getSoundVolume() * 100))}
-                      @input=${handleVolumeChange}
-                      aria-label="Volym anime-ljud"
-                      title="Volym: ${Math.round(getSoundVolume() * 100)}%"
-                    />
-                    <span class="sound-slider-val">${Math.round(getSoundVolume() * 100)}%</span>
-                  </div>`
+                      <span class="theme-icon" aria-hidden="true"
+                        >${isSoundMuted() || getSoundVolume() === 0 ? '🔇' : '🔊'}</span
+                      >
+                      <span class="sound-label"
+                        >${isSoundMuted() || getSoundVolume() === 0 ? 'Tyst' : 'Ljud'}</span
+                      >
+                    </button>
+                    <div
+                      class="sound-slider-wrapper"
+                      title="Anime-ljud: ${Math.round(getSoundVolume() * 100)}%"
+                    >
+                      <span class="sound-slider-icon" aria-hidden="true">🌸</span>
+                      <input
+                        type="range"
+                        class="sound-slider"
+                        min="0"
+                        max="100"
+                        step="5"
+                        .value=${String(Math.round(getSoundVolume() * 100))}
+                        @input=${handleVolumeChange}
+                        aria-label="Volym anime-ljud"
+                        title="Volym: ${Math.round(getSoundVolume() * 100)}%"
+                      />
+                      <span class="sound-slider-val">${Math.round(getSoundVolume() * 100)}%</span>
+                    </div>`
                 : ''
             }
             <button
@@ -481,13 +571,19 @@ function ask(text, confirmLabel = 'Fortsätt') {
     dialog.showModal();
   });
 }
-function navigate(id) {
+function navigate(id, pushState = true) {
   flush();
   if (view === 'multiplayer' && id !== 'multiplayer') {
     resetMultiplayerView(user?.uid);
   }
   session = null;
   view = id;
+  if (pushState && typeof window !== 'undefined' && window.history?.pushState) {
+    const nextPath = id === 'home' ? '/' : `/${id}`;
+    if (window.location.pathname !== nextPath) {
+      window.history.pushState({ view: id }, '', nextPath);
+    }
+  }
   render(true);
 }
 async function start(topic, options = {}) {
@@ -876,9 +972,15 @@ window.addEventListener('online', () => {
   }
 });
 if (typeof window !== 'undefined') {
+  initClickParticles(() => state.theme);
   window.openGuideModal = openGuideModal;
   window.addEventListener('open-guide-modal', (e) => {
     openGuideModal(e.detail?.guideId);
+  });
+  window.addEventListener('popstate', () => {
+    const path = window.location.pathname.replace(/^\/+/, '').split('/')[0] || 'home';
+    const targetView = KNOWN_VIEWS.includes(path) ? path : 'home';
+    navigate(targetView, false);
   });
   window.addEventListener('keydown', (e) => {
     if (!session || session.done || session.mode === 'exam') return;

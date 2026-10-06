@@ -3,11 +3,21 @@ import { questions, topics } from '../data.js';
 import { daysUntil } from '../engine.js';
 import { icon, dateText } from './shared.js';
 import { playAnimeSound } from '../audio.js';
+import { getStudyMascotQuote, pokeStudyMascot } from '../mascot-dialogue.js';
 export function homeView(ctx) {
   const { state, now, plan } = ctx,
     p = ctx.progress(),
     days = daysUntil(state.examDate, now),
-    currentPref = state.preferredCount || 10;
+    currentPref = state.preferredCount || 10,
+    studyQuote = ctx.getStudyMascotQuote ? ctx.getStudyMascotQuote() : getStudyMascotQuote(),
+    onPokeStudy = () => {
+      if (ctx.pokeStudyMascot) {
+        ctx.pokeStudyMascot();
+      } else {
+        pokeStudyMascot(ctx.theme);
+        ctx.render?.();
+      }
+    };
   return html`<section class="page-heading">
       <div>
         <p class="overline">DITT STUDIERUM</p>
@@ -103,16 +113,25 @@ export function homeView(ctx) {
         ctx.theme === 'sakura'
           ? html`<div class="anime-figure anime-study-panel">
               <div class="anime-mascot-wrapper">
-                <div class="kawaii-speech-bubble focus-bubble">
-                  <span>先輩、今日もいっしょにがんばろう！✨</span>
-                  <small>Kämpa på, senpai! 💕</small>
+                <div
+                  class="kawaii-speech-bubble focus-bubble"
+                  aria-live="polite"
+                  style="cursor: pointer;"
+                  title="Klicka på mig! ✨"
+                  @click=${onPokeStudy}
+                >
+                  <span
+                    >${studyQuote.jp}
+                    <span class="kaomoji" aria-hidden="true">${studyQuote.kaomoji}</span></span
+                  >
+                  <small>${studyQuote.sv}</small>
                 </div>
                 <button
                   type="button"
                   class="anime-study-avatar-btn"
-                  title="Klicka på mig! ✨ (Arigato~)"
-                  aria-label="Klicka på anime-maskoten för att spela Arigato"
-                  @click=${() => playAnimeSound('arigato', ctx.theme)}
+                  title="Klicka på mig! ✨"
+                  aria-label="Klicka på anime-maskoten för att prata"
+                  @click=${onPokeStudy}
                 >
                   <img
                     src="/anime/study.jpg"

@@ -1,24 +1,32 @@
-## 2026-10-04T16:44:36Z
-You are an Explorer subagent for TentaPlugg (GEMA70/JAPC11).
+# DISPATCH: Survey Explorer 3 (Views Theming & Verification Infrastructure)
+
+## Objective
+Map the Vocabulary (`/vocabulary`) and Particle (`/particles`) views, compare their styling against existing study/exam/guide views, and examine the test runner and build toolchain.
+
+## Context & Inputs
+- Project Root: c:\Users\Najk\Documents\ChatGPT\TentaPlugg
+- Requirements: c:\Users\Najk\Documents\ChatGPT\TentaPlugg\.agents\teamwork\ORIGINAL_REQUEST.md (under 2026-10-06T08:28:33Z)
+- Focus: R5 (Theming for Vocabulary and Particle Views) and Acceptance Criteria (npm test 109+ tests, build, format:check)
+
+## Investigation Questions
+1. How are `/vocabulary` and `/particles` structured? Which source files render these views?
+2. What cute pastel banner cards, kawaii tip callouts, or badge styling exist in the study, exam, and guide views that should be adapted to vocabulary and particle views?
+3. How do these views behave in Classic vs Sakura mode? What classes or elements need to be conditioned?
+4. What is the current test setup (`npm test`, vitest/jest, test file locations, existing test count)? How are theme-related tests currently written?
+5. What are the npm scripts for `npm run build` and `npm run format:check`? Are there formatting rules (Prettier / ESLint) to be aware of?
+
+## Output Requirements
+Produce a comprehensive report in:
+`c:\Users\Najk\Documents\ChatGPT\TentaPlugg\.agents\teamwork\explorer_survey_3\report.md`
+and write your `handoff.md` summarizing findings.
+
+
+## 2026-10-06T08:31:25Z
+You are Explorer 3 on the Ultra Kawaii upgrade project.
 Your working directory is: c:\Users\Najk\Documents\ChatGPT\TentaPlugg\.agents\teamwork\explorer_survey_3
-Project root: c:\Users\Najk\Documents\ChatGPT\TentaPlugg
-The authoritative user request is in: c:\Users\Najk\Documents\ChatGPT\TentaPlugg\.agents\teamwork\ORIGINAL_REQUEST.md
-
-MANDATORY: Read c:\Users\Najk\Documents\ChatGPT\TentaPlugg\.agents\teamwork\ORIGINAL_REQUEST.md first.
-
-Your mission in this Survey phase is to investigate R3: Sakura Anime Vibes-tema & figurer samt Bygg/Test-infrastruktur.
-Specifically:
-1. Explore the styling and UI setup (CSS, Tailwind, themes, color variables, layout).
-2. How is theme switching best implemented (🌸 Sakura Anime vs 🎓 Klassisk) and persisted in localStorage?
-3. Check the images in `public/anime/` (`study.jpg`, `cheer.jpg`, `encourage.jpg`) and determine where and how they should be integrated (e.g. studierummet/hemskärmen, Yatta/success moments, resultatpanelen).
-4. How to ensure high readability, responsiveness, and WCAG AA contrast in both themes, ensuring anime figures are cleanly hidden in Classic mode?
-5. Check package.json, build setup (`npm run build`), test setup (`npm test`), and the existing 24 unit tests.
-6. Identify all relevant files, components, and potential conflicts.
-7. Note any potential risks or edge cases.
-
-Scope boundaries:
-- You are strictly READ-ONLY. Do NOT modify source code files.
-- Write your comprehensive findings and analysis to c:\Users\Najk\Documents\ChatGPT\TentaPlugg\.agents\teamwork\explorer_survey_3\analysis.md
-- Write a structured handoff to c:\Users\Najk\Documents\ChatGPT\TentaPlugg\.agents\teamwork\explorer_survey_3\handoff.md
-- Maintain progress.md in your working directory.
-- When finished, send a message to orchestrator with a summary and reference to handoff.md.
+Your task assignment is in: c:\Users\Najk\Documents\ChatGPT\TentaPlugg\.agents\teamwork\explorer_survey_3\DISPATCH.md
+You MUST read: c:\Users\Najk\Documents\ChatGPT\TentaPlugg\.agents\teamwork\ORIGINAL_REQUEST.md
+Investigate Views & Routes (`/vocabulary` and `/particles`), existing study/exam/guide cards & styling, test suite structure (`npm test` 109+ tests, vitest/jest setup, test runner, format check) (for R5, testing and verification requirements).
+Produce your findings report at: c:\Users\Najk\Documents\ChatGPT\TentaPlugg\.agents\teamwork\explorer_survey_3\report.md
+and your handoff at: c:\Users\Najk\Documents\ChatGPT\TentaPlugg\.agents\teamwork\explorer_survey_3\handoff.md
+Send a message when complete.

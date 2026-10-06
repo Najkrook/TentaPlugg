@@ -981,7 +981,7 @@ export async function advanceRoundIfDue(lobbyId) {
     } else if (
       game.status === 'playing' &&
       ((game.firstAnswerAt && now - game.firstAnswerAt > ROUND_TIME_MS) ||
-       (game.roundStartTime && now - game.roundStartTime > 60000))
+        (game.roundStartTime && now - game.roundStartTime > 60000))
     ) {
       const playersMap = data.players || {};
       const updated = closeRound(game, now, playersMap);

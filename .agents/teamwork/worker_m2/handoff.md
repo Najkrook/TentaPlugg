@@ -1,149 +1,103 @@
-# Handoff Report: Milestone M2 Implementation (R2: Flexibel Spaced Repetition & Sessionsstorlek)
+# Handoff Report: Milestone M2 (Particle Burst Effects & Jelly Bouncy Interactions)
 
 ## 1. Observation
 
-1. **`src/views/home.js:29-87`**:
-   - Added a responsive, accessible segmented pill selector (`role="radiogroup"`) inside `.focus-copy`:
-     - Options: `5`, `10`, `20`, and `Alla förfallna (${p.due})`.
-     - When `p.due === 0`, the "Alla förfallna (0)" button has `?disabled` and `aria-disabled="true"`.
-     - Arrow keys (`ArrowRight`, `ArrowLeft`, `ArrowDown`, `ArrowUp`) navigate between valid options.
-     - Dynamic hint displays session duration estimates:
-       - 5: `"5 frågor · cirka 3 minuter"`
-       - 10: `"10 frågor · cirka 5 minuter"`
-       - 20: `"20 frågor · cirka 10 minuter"`
-       - all: `"${p.due} frågor · repetera allt förfallet"`
-   - Wired selection to `ctx.setPreferredCount(count)`.
+1. **`src/particles-fx.js:1-177`**:
+   - Implemented particle engine exporting `initClickParticles(getTheme)`, `purgeParticles()`, `spawnParticleBurst(x, y, options)`, and `getActiveParticleCount()`.
+   - Generates transient floating sparkle (`✨`), heart (`💖`), and sakura petal (`🌸`, `💕`, `⭐`) particles originating at `(clientX, clientY)`.
+   - Radial physics: random angle `(2 * Math.PI * i) / count + jitter`, distance 30–80px (`30 + Math.random() * 50`), upward drift `dy = Math.sin(angle) * distance - (20 + Math.random() * 15)`, and rotation `(Math.random() * 240 - 120).toFixed(1)`.
+   - Dual-cleanup lifecycle: element auto-removes on `animationend`, backed up by a 1,000ms safety `setTimeout` fallback.
+   - Enforces concurrent particle ceiling (`MAX_CONCURRENT_PARTICLES = 40`) by shifting and unmounting oldest particles if count reaches 40.
+   - Hard-hiding invariant: each particle carries `.anime-figure.kawaii-click-particle` and `aria-hidden="true"`.
+   - Gating: strictly does NOT spawn particles if `getTheme() !== 'sakura'` or `window.matchMedia('(prefers-reduced-motion: reduce)').matches`.
+   - `purgeParticles()` removes all active particle elements from DOM and clears tracking array.
 
-2. **`src/main.js:125-132, 142, 347-386, 473-484, 663-703`**:
-   - Implemented `setPreferredCount(count)`: validates count in `[5, 10, 20, 'all']`, updates `state.preferredCount`, sets `state.settingsAt = Date.now()`, calls `persist(true)` and `render()`.
-   - Bound `setPreferredCount` into `getCtx()`.
-   - Updated `start(topic, options = {})`:
-     - Derives `chosenCount = options.count !== undefined ? options.count : (state.preferredCount || 10)`.
-     - When `chosenCount === 'all'`, sets `isAllDue = true`, `dueOnly = true`, and `count = Infinity`.
-     - Correctly queries `selectPractice(bank, state.stats, topic, count, Date.now(), options)`.
-     - Preserves fallback prompt for extra practice (`candidateBank`) when 0 due questions exist.
-   - Updated `grade(okOrRating, advance = false)`: handles string ratings (`'again'`, `'hard'`, `'good'`, `'easy'`), correctly calls `recordReview`, and evaluates announcements based on rating.
-   - Added global keyboard shortcut handler:
-     - Handles keys `'1'`, `'2'`, `'3'`, `'4'` mapped to `'again'`, `'hard'`, `'good'`, `'easy'`.
-     - Guards against typing in text inputs/textareas (`!active.readOnly`), IME composition (`composing || e.isComposing`), modifier keys (`ctrlKey || metaKey || altKey`), open modals (`dialog[open]`), exam mode (`session.mode === 'exam'`), and completed sessions (`session.done`).
+2. **`src/style.css:2689-2724, 3590-3650`**:
+   - Added `@keyframes kawaii-burst-fly`: transforms from `scale(0.6) rotate(0deg)` to `translate3d(var(--dx), var(--dy), 0) scale(1.15) rotate(var(--rot))` with opacity fade to 0.
+   - Added `.kawaii-click-particle`: `position: fixed; pointer-events: none; z-index: 9999; animation: kawaii-burst-fly 0.75s cubic-bezier(0.22, 1, 0.36, 1) forwards; transition: none !important;`.
+   - Added `.kaomoji`: `display: inline-block; font-family: 'Noto Sans JP', sans-serif; font-weight: normal; user-select: none;`.
+   - Added Jelly Bouncy Micro-interactions under `[data-theme='sakura']` for `.primary`, `.secondary`, `.theme-toggle`, `.rating-btn`, `.topic-card`, `.sidebar-chibi-card`:
+     - `transition: transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.28s ease;`
+     - Hover: `transform: translateY(-3px) scale(1.03);`
+     - Active: `transform: translateY(1px) scale(0.96);`
+   - Added `@media (prefers-reduced-motion: reduce)` suppression overrides setting `transform: none !important; transition: none !important;`.
+   - Lines 2495–2508 (`:root:not([data-theme='sakura']) .anime-figure`) remained strictly untouched.
 
-3. **`src/views/session.js:8-23, 31-36, 123-157, 169-204`**:
-   - Exported `formatInterval(ms)` and `previewRatingInterval(box, rating)` derived from `INTERVALS`:
-     - Box 0: again $\to$ `10m`, hard $\to$ `10m`, good $\to$ `1d`, easy $\to$ `3d`
-     - Box 1: again $\to$ `10m`, hard $\to$ `1d`, good $\to$ `3d`, easy $\to$ `7d`
-     - Box 2: again $\to$ `10m`, hard $\to$ `1d`, good $\to$ `7d`, easy $\to$ `14d`
-     - Box 3: again $\to$ `10m`, hard $\to$ `1d`, good $\to$ `14d`, easy $\to$ `14d`
-     - Box 4: again $\to$ `10m`, hard $\to$ `1d`, good $\to$ `14d`, easy $\to$ `14d`
-   - Captured starting box in `s.startBox[q.id]` before initial review/check to guarantee deterministic, stable live interval previews.
-   - In practice mode (`s.mode !== 'exam'`), when `feedback` is displayed, rendered `ratingButtonsTemplate(ctx, q, currentBox)`.
-   - In exam mode (`s.mode === 'exam'`), strictly maintained buttons `"Jag kunde detta"` and `"Behöver öva mer"` for `q.self`.
-   - In auto-graded practice mode, kept `<button class="primary" @click=${ctx.next}>Nästa fråga / Visa resultat</button>` in `.question-actions` for automated tests and standard navigation.
+3. **`src/main.js:50, 89-94, 932-934`**:
+   - Imported `initClickParticles, purgeParticles` from `./particles-fx.js`.
+   - In `applyTheme(t)`: if `effective !== 'sakura'`, calls `purgeParticles()`.
+   - In window initialization block: called `initClickParticles(() => state.theme)`.
 
-4. **`src/style.css:2013-2253`**:
-   - Added responsive CSS for `.session-picker`, `.pill-group`, and `.pill-btn`.
-   - Added `.focus-copy { position: relative; z-index: 5; }` and `.particle-art { pointer-events: none; }` to eliminate mobile click obstruction.
-   - Added styles for `.rating-group`, `.rating-header`, `.rating-buttons`, and `.rating-btn`.
-   - Verified WCAG AA contrast ratio compliance:
-     - `rating-again`: `#ad3b24` on `#fff8f5` (contrast ratio 6.03:1, threshold 4.5:1)
-     - `rating-hard`: `#8c5d0f` on `#fdfaf2` (contrast ratio 5.52:1, threshold 4.5:1)
-     - `rating-good`: `#236319` on `#f4faf0` (contrast ratio 6.45:1, threshold 4.5:1)
-     - `rating-easy`: `#175c74` on `#f0f8fa` (contrast ratio 6.58:1, threshold 4.5:1)
-     - Active pill: `#183f37` on `#d7f296` (contrast ratio 9.15:1, threshold 4.5:1)
-     - Inactive pill: `#e2ede6` on `#183f37` (contrast ratio 11.4:1, threshold 4.5:1)
-   - Mobile responsive rules: 2x2 grid for rating buttons on $\le 600\text{px}$, responsive horizontal flex on $\le 760\text{px}$.
+4. **`src/views/session.js:23-45, 237-238, 244-279`**:
+   - Exported `formatRatingLabel(rating, theme)`, `RATING_KAOMOJI`, `RATING_LABELS`.
+   - In `ratingButtonsTemplate`:
+     - When `ctx.theme === 'sakura'`, renders joyful kaomojis in `.rating-label`: `Igen (｡•́︿•̀｡)`, `Svårt (´-﹏-`；)`, `Bra (o^▽^o)`, `Lätt (★ω★)`.
+     - When in Classic mode, renders clean Swedish: `Igen`, `Svårt`, `Bra`, `Lätt`.
+     - Maintained clean accessible `aria-label` on rating buttons (`aria-label="${label} (${interval}, tangent ${key})"`).
+   - In `question-actions`:
+     - Appended `<span class="kaomoji" aria-hidden="true">✨</span>` on submit button (`Kontrollera svar`) and `<span class="kaomoji" aria-hidden="true">🌸</span>` on `Nästa fråga / Visa resultat` in Sakura mode.
+     - Preserved exact accessible names for Playwright tests and screen readers.
 
-5. **`tests/engine.test.js:3-6, 233-397`**:
-   - Added 4 comprehensive unit test suites:
-     - `Leitner engine verifies full 4-rating progression matrix across boxes 0 to 4`: tests all 20 transitions across Boxes 0–4 and all 4 ratings, plus initial question state.
-     - `Leitner engine enforces box 4 ceiling, box 0 floor, and premature review safeguards`: tests box clamping and early review behavior.
-     - `Leitner engine ensures complete backwards compatibility for boolean ok and legacy reviews`: verifies boolean `ok` inputs and `rebuildStats` without `rating` property.
-     - `Schema compatibility guarantees version 2 and prevents reset migrations`: tests that `SCHEMA_VERSION = 2` is preserved and no data is wiped.
+5. **`tests/particles_interactive.test.js:1-290`**:
+   - 8 unit tests covering full particle lifecycle, physics values, capacity limits, dual cleanup, theme gating, reduced-motion suppression, formatRatingLabel outputs, and CSS contract.
+   - All 8 tests pass with exit code 0.
 
-6. **Tool Commands and Results**:
-   - `npm test`:
-     ```
-     > node --test --test-isolation=none tests/*.test.js
-     ℹ tests 48
-     ℹ suites 0
-     ℹ pass 48
-     ℹ fail 0
-     ℹ duration_ms 124.6046
-     ```
-   - `npm run build`:
-     ```
-     > vite build
-     ✓ built in 1.83s
-     dist/index.html                     0.68 kB
-     dist/assets/index-SxEYtOkY.css     29.05 kB
-     dist/assets/index-BbBFvyr0.js      97.97 kB
-     dist/assets/firebase-BN_uS7yZ.js  531.30 kB
-     ```
-
----
+6. **Test Suite & Build Results**:
+   - `npm test`: 141 tests pass (0 failures, 0 regressions, duration ~1.2s).
+   - `npm run build`: exits with code 0 (1,603 modules transformed).
+   - `npx prettier --check src/particles-fx.js src/main.js src/style.css src/views/session.js tests/particles_interactive.test.js`: all files pass check cleanly.
 
 ## 2. Logic Chain
 
-1. **Session Size Selection (Requirement R2)**:
-   - Observation 1 and 2: `state.preferredCount` defaults to 10. `ctx.setPreferredCount(count)` persists user selection to `localStorage` through `persist(true)`.
-   - When a session starts in `start(topic, options)`, reading `options.count ?? state.preferredCount ?? 10` ensures that selecting 5, 10, 20 or all due questions filters `selectPractice` to the exact count requested.
-   - When 0 due questions exist, the "Alla förfallna (0)" button is disabled via `?disabled=${p.due === 0}` and `aria-disabled="true"`.
-   - Verified by test `Tier 1: Session size selection logic honors 5, 10, 20, and all due questions`.
+1. **R2 Transient Click Particles**:
+   - From `PROJECT.md` and `DISPATCH.md`, Sakura mode requires transient particle bursts on clicks/taps originating from `(clientX, clientY)` with dual-cleanup and reduced-motion gating.
+   - `src/particles-fx.js` attaches a capture-phase click listener to `window`. When `getTheme() === 'sakura'` and `prefers-reduced-motion` is false, it creates 5–7 span elements with radial angle dispersion, distance, and upward drift.
+   - Elements are tagged with `.anime-figure.kawaii-click-particle` so that the Hard-Hiding Invariant (`:root:not([data-theme='sakura']) .anime-figure { display: none !important; }`) is inherently satisfied.
+   - Dual-cleanup unmounts on `animationend` (750ms keyframe) with a 1,000ms safety `setTimeout` fallback.
+   - Capacity ceiling caps concurrent elements to $\le 40$, unmounting oldest elements if exceeded.
+   - Switching theme to Classic calls `purgeParticles()`, clearing all active elements immediately.
 
-2. **Self-Rating Review & Leitner Progression (Requirement R2)**:
-   - Observation 3: In practice mode, when `feedback` is displayed, the student can rate the question with one of 4 ratings (`again`, `hard`, `good`, `easy`).
-   - Clicking any rating calls `ctx.grade(rating, true)`, which invokes `recordReview`, updates the Leitner box and `dueAt` timestamp, updates session grades and results, persists to storage, and advances immediately to the next question.
-   - The starting box is cached in `s.startBox[q.id]` when the question is first presented, ensuring that the live interval preview displays the true before-review transition rather than recalculating against the post-check stat.
-   - Verified by tests `Leitner engine verifies full 4-rating progression matrix across boxes 0 to 4` and `Tier 3: Answering with self-rating updates SRS and controls subsequent practice due calculations`.
-
-3. **Backwards Compatibility & Exam Mode Preservation**:
-   - Observation 2 & 3: In exam mode (`s.mode === 'exam'`), the 4 rating buttons are NOT displayed. Instead, `"Jag kunde detta"` and `"Behöver öva mer"` are strictly preserved.
-   - In practice mode for auto-graded questions, `"Nästa fråga"` and `"Visa resultat"` are kept in `.question-actions`.
-   - Stored reviews and sync logic support legacy boolean `ok` values via `r.rating ?? r.ok` and fallback to `'good'`/`'again'` without database resets.
-   - Verified by test `Leitner engine ensures complete backwards compatibility for boolean ok and legacy reviews`.
-
-4. **Accessibility and WCAG AA Compliance**:
-   - Observation 4: Color tokens for all 4 rating buttons exceed the WCAG AA minimum 4.5:1 text-to-background contrast ratio (ratings range between 5.52:1 and 6.58:1; pill buttons range between 9.15:1 and 11.4:1).
-   - Keyboard shortcuts 1–4 are protected against IME composition, active editable textareas/inputs, and dialog focus.
-   - WAI-ARIA attributes (`role="radiogroup"`, `role="radio"`, `aria-checked`, `aria-keyshortcuts`, `aria-label`) ensure screen reader clarity.
-   - Verified by test `Tier 4: WCAG AA contrast ratio compliance for core theme palette`.
-
----
+2. **R4 Jelly Bouncy Micro-interactions & Kaomoji Micro-copy**:
+   - Elastic spring curve `cubic-bezier(0.34, 1.56, 0.64, 1)` provides the tactile bouncy jelly feel specified in `DISPATCH.md`.
+   - Applying `transform: translateY(-3px) scale(1.03)` on hover and `transform: translateY(1px) scale(0.96)` on active delivers playful responsiveness to buttons, topic cards, and chibi cards.
+   - Suppressing transforms under `@media (prefers-reduced-motion: reduce)` protects vestibular-sensitive users.
+   - Classic mode retains standard flat styling.
+   - Embedding kaomojis inside `<span class="kaomoji" aria-hidden="true">` ensures joyful visual presentation in Sakura mode while strictly preserving clean accessible names for screen readers and Playwright tests (`exact: true` checks).
 
 ## 3. Caveats
 
-- **Premature Review Safeguard**: In accordance with standard Leitner scheduling, reviewing a card early with `'good'` before `dueAt` does not promote the card to the next box (verified by unit test).
-- **Exam Mode Scoring**: Exam mode does not use spaced repetition ratings; it preserves the 100-point rubric and self-assessment workflow.
-- No other caveats.
-
----
+- In headless Node environments without DOM APIs, `particles-fx.js` gracefully returns early; tests utilize a lightweight mock DOM to verify the full browser lifecycle.
+- Prettier check on the whole repository flags unrelated files that were not part of this milestone (`PROJECT.md`, `src/multiplayer.js`, `TEST_INFRA.md`). All files modified or created in Milestone 2 are 100% formatted.
 
 ## 4. Conclusion
 
-Milestone M2 (R2: Flexibel Spaced Repetition & Sessionsstorlek) is completely implemented, verified, and passing all tests:
-- Session size selector with 5, 10, 20, and all due questions is functional on the home view with localStorage persistence and dynamic hints.
-- 4-tier self-rating review buttons (`again`, `hard`, `good`, `easy`) with live interval previews and 1–4 keyboard shortcuts are active in practice mode.
-- Exam mode and automated test flows are 100% preserved.
-- All styles exceed WCAG AA contrast (>4.5:1) and are responsive.
-- 48 tests pass cleanly (`npm test`), and the Vite production build succeeds with code 0 (`npm run build`).
-
----
+Milestone 2 (R2 & R4) is complete, robust, fully tested, and ready for integration. All 141 tests pass with 0 failures, and production build succeeds cleanly.
 
 ## 5. Verification Method
 
-To independently verify the implementation:
+To independently verify this milestone:
 
-1. **Run Full Test Suite**:
-   ```powershell
+1. **Run full unit test suite**:
+   ```bash
    npm test
    ```
-   *Expected result*: 48 passed, 0 failed.
-2. **Run Production Build**:
-   ```powershell
+   *Expected result*: 141 tests pass, 0 failures.
+
+2. **Run milestone-specific tests**:
+   ```bash
+   node --test tests/particles_interactive.test.js
+   node --test tests/ultra_kawaii.test.js
+   ```
+   *Expected result*: All particle, jelly interaction, and ultra kawaii tests pass.
+
+3. **Verify production build**:
+   ```bash
    npm run build
    ```
-   *Expected result*: Exit code 0, cleanly bundling all assets into `dist/`.
-3. **Verify Contrast Ratios**:
-   Inspect `src/style.css:2188-2234` to confirm rating text colors (`#ad3b24`, `#8c5d0f`, `#236319`, `#175c74`) on their respective backgrounds exceed 4.5:1.
-4. **Invalidation Conditions**:
-   - If `SCHEMA_VERSION` is altered from 2, existing reviews in localStorage will be wiped on migration.
-   - If `'hard'` interval does not clamp to $\le 1\text{d}$, SRS progression tests will fail.
+   *Expected result*: Vite transforms 1,603 modules and exits 0.
+
+4. **Verify formatting of modified files**:
+   ```bash
+   npx prettier --check src/particles-fx.js src/main.js src/style.css src/views/session.js tests/particles_interactive.test.js
+   ```
+   *Expected result*: All matched files use Prettier code style.

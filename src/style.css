@@ -209,6 +209,9 @@ small {
   flex-direction: column;
   z-index: 20;
   transform: translateZ(0);
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
 }
 .brand {
   text-decoration: none;
@@ -1676,6 +1679,11 @@ textarea {
     transition: none !important;
     scroll-behavior: auto !important;
   }
+  .sakura-petal,
+  .sakura-petals-container {
+    animation: none !important;
+    display: none !important;
+  }
 }
 
 .confirm-dialog {
@@ -2686,6 +2694,41 @@ html:not([data-theme='sakura']) .sound-slider,
   }
 }
 
+/* Click & Touch Particle Burst Effects (R2) */
+@keyframes kawaii-burst-fly {
+  0% {
+    transform: translate(-50%, -50%) translate3d(0, 0, 0) scale(0.6) rotate(0deg);
+    opacity: 1;
+  }
+  65% {
+    opacity: 0.95;
+  }
+  100% {
+    transform: translate(-50%, -50%) translate3d(var(--dx, 0px), var(--dy, -30px), 0) scale(1.15)
+      rotate(var(--rot, 45deg));
+    opacity: 0;
+  }
+}
+
+.kawaii-click-particle {
+  position: fixed;
+  pointer-events: none;
+  z-index: 9999;
+  user-select: none;
+  line-height: 1;
+  font-size: 16px;
+  animation: kawaii-burst-fly 0.75s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  will-change: transform, opacity;
+  transition: none !important;
+}
+
+.kaomoji {
+  display: inline-block;
+  font-family: 'Noto Sans JP', sans-serif;
+  font-weight: normal;
+  user-select: none;
+}
+
 /* Floating Sakura Petals (Screen Atmosphere) */
 .sakura-petals-container {
   position: fixed;
@@ -2898,10 +2941,21 @@ html:not([data-theme='sakura']) .sound-slider,
   box-shadow: 0 4px 14px rgba(244, 114, 182, 0.18);
   transform: rotate(-1deg);
   transition: transform 0.2s ease;
+  cursor: pointer;
+  user-select: none;
+}
+
+[data-theme='sakura'] .sidebar-chibi-card:focus-visible {
+  outline: 3px solid #ffcfe0;
+  outline-offset: 3px;
 }
 
 [data-theme='sakura'] .sidebar-chibi-card:hover {
   transform: translateY(-2px) rotate(0deg);
+}
+
+[data-theme='sakura'] .sidebar-chibi-card:active {
+  transform: translateY(1px) scale(0.98);
 }
 
 [data-theme='sakura'] .sidebar-chibi-img-wrap {
@@ -3539,6 +3593,62 @@ html:not([data-theme='sakura']) .sound-slider,
   background: #fdf2f8;
   border-color: #f472b6;
   color: #9d174d;
+}
+
+/* ==========================================================================
+   Jelly Bouncy Micro-interactions (R4) - Sakura Mode
+   ========================================================================== */
+[data-theme='sakura'] .primary,
+[data-theme='sakura'] .secondary,
+[data-theme='sakura'] .theme-toggle,
+[data-theme='sakura'] .rating-btn,
+[data-theme='sakura'] .topic-card,
+[data-theme='sakura'] .sidebar-chibi-card {
+  transition:
+    transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1),
+    box-shadow 0.28s ease;
+}
+
+[data-theme='sakura'] .primary:hover,
+[data-theme='sakura'] .secondary:hover,
+[data-theme='sakura'] .theme-toggle:hover,
+[data-theme='sakura'] .rating-btn:hover,
+[data-theme='sakura'] .topic-card:hover,
+[data-theme='sakura'] .sidebar-chibi-card:hover {
+  transform: translateY(-3px) scale(1.03);
+}
+
+[data-theme='sakura'] .primary:active,
+[data-theme='sakura'] .secondary:active,
+[data-theme='sakura'] .theme-toggle:active,
+[data-theme='sakura'] .rating-btn:active,
+[data-theme='sakura'] .topic-card:active,
+[data-theme='sakura'] .sidebar-chibi-card:active {
+  transform: translateY(1px) scale(0.96);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-theme='sakura'] .primary,
+  [data-theme='sakura'] .secondary,
+  [data-theme='sakura'] .theme-toggle,
+  [data-theme='sakura'] .rating-btn,
+  [data-theme='sakura'] .topic-card,
+  [data-theme='sakura'] .sidebar-chibi-card,
+  [data-theme='sakura'] .primary:hover,
+  [data-theme='sakura'] .secondary:hover,
+  [data-theme='sakura'] .theme-toggle:hover,
+  [data-theme='sakura'] .rating-btn:hover,
+  [data-theme='sakura'] .topic-card:hover,
+  [data-theme='sakura'] .sidebar-chibi-card:hover,
+  [data-theme='sakura'] .primary:active,
+  [data-theme='sakura'] .secondary:active,
+  [data-theme='sakura'] .theme-toggle:active,
+  [data-theme='sakura'] .rating-btn:active,
+  [data-theme='sakura'] .topic-card:active,
+  [data-theme='sakura'] .sidebar-chibi-card:active {
+    transform: none !important;
+    transition: none !important;
+  }
 }
 
 /* Session Picker Pills */
@@ -4645,8 +4755,13 @@ html:not([data-theme='sakura']) .sound-slider,
   animation: timerBadgePulse 1s ease-in-out infinite;
 }
 @keyframes timerBadgePulse {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.04); }
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.04);
+  }
 }
 .timer-track {
   width: 100%;
@@ -5197,4 +5312,793 @@ html:not([data-theme='sakura']) .sound-slider,
 }
 [data-theme='sakura'] .timer-fill.timer-running {
   background: #d6336c;
+}
+
+/* ==========================================================================
+   Vocabulary and Particle Views Theming (Milestone 3 / R5)
+   ========================================================================== */
+
+/* Breadcrumb & Navigation */
+.view-breadcrumb {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Sidebar Extra Study Links */
+.sidebar-study-links {
+  padding-top: 6px;
+  margin-top: 6px;
+  border-top: 1px dashed var(--line);
+}
+
+[data-theme='sakura'] .sidebar-study-links {
+  border-top-color: #f7cadb;
+}
+
+.sub-nav-item {
+  font-size: 13px;
+  padding: 10px 14px;
+}
+
+/* Vocabulary Anime Banner Card (Sakura Theme) */
+[data-theme='sakura'] .vocab-anime-banner-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: linear-gradient(135deg, #fff0f5 0%, #fdf2f8 50%, #fae8ff 100%);
+  border: 2px dashed #f472b6;
+  border-radius: 20px;
+  padding: 16px 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 8px 24px rgba(244, 114, 182, 0.15);
+  box-sizing: border-box;
+  max-width: 100%;
+}
+
+[data-theme='sakura'] .vocab-anime-banner-card img {
+  width: 85px;
+  height: 85px;
+  object-fit: cover;
+  border-radius: 16px;
+  border: 3px solid #ffffff;
+  box-shadow: 0 4px 12px rgba(184, 39, 99, 0.2);
+  flex-shrink: 0;
+}
+
+[data-theme='sakura'] .vocab-anime-copy {
+  flex: 1;
+}
+
+[data-theme='sakura'] .vocab-anime-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 800;
+  color: #be185d;
+  background: #ffffff;
+  border: 1.5px solid #ec4899;
+  padding: 2px 10px;
+  border-radius: 9999px;
+  margin-bottom: 6px;
+  margin-right: 6px;
+  box-shadow: 0 2px 6px rgba(236, 72, 153, 0.2);
+}
+
+[data-theme='sakura'] .vocab-anime-omamori {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 800;
+  color: #9f1239;
+  background: #ffffff;
+  border: 1.5px solid #f43f5e;
+  padding: 2px 10px;
+  border-radius: 9999px;
+  margin-bottom: 6px;
+  box-shadow: 0 2px 6px rgba(244, 63, 94, 0.2);
+}
+
+[data-theme='sakura'] .vocab-anime-copy h3 {
+  margin: 0 0 4px;
+  font-size: 16px;
+  color: #881337;
+}
+
+[data-theme='sakura'] .vocab-anime-copy p {
+  margin: 0;
+  font-size: 12px;
+  color: #784f60;
+}
+
+/* Particle Anime Banner Card (Sakura Theme) */
+[data-theme='sakura'] .particle-anime-banner-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: linear-gradient(135deg, #fff0f5 0%, #ffe5f0 50%, #fef3c7 100%);
+  border: 2px dashed #f472b6;
+  border-radius: 20px;
+  padding: 16px 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 8px 24px rgba(244, 114, 182, 0.15);
+  box-sizing: border-box;
+  max-width: 100%;
+}
+
+[data-theme='sakura'] .particle-anime-banner-card img {
+  width: 85px;
+  height: 85px;
+  object-fit: cover;
+  border-radius: 16px;
+  border: 3px solid #ffffff;
+  box-shadow: 0 4px 12px rgba(184, 39, 99, 0.2);
+  flex-shrink: 0;
+}
+
+[data-theme='sakura'] .particle-anime-copy {
+  flex: 1;
+}
+
+[data-theme='sakura'] .particle-anime-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 800;
+  color: #9f1239;
+  background: #ffffff;
+  border: 1.5px solid #f43f5e;
+  padding: 2px 10px;
+  border-radius: 9999px;
+  margin-bottom: 6px;
+  margin-right: 6px;
+  box-shadow: 0 2px 6px rgba(244, 63, 94, 0.2);
+}
+
+[data-theme='sakura'] .particle-anime-omamori {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 800;
+  color: #b82763;
+  background: #ffffff;
+  border: 1.5px solid #ffcfe0;
+  padding: 2px 10px;
+  border-radius: 9999px;
+  margin-bottom: 6px;
+  box-shadow: 0 2px 6px rgba(184, 39, 99, 0.15);
+}
+
+[data-theme='sakura'] .particle-anime-copy h3 {
+  margin: 0 0 4px;
+  font-size: 16px;
+  color: #881337;
+}
+
+[data-theme='sakura'] .particle-anime-copy p {
+  margin: 0;
+  font-size: 12px;
+  color: #784f60;
+}
+
+/* Kawaii Tip Callouts */
+.kawaii-tip-callout {
+  border-radius: 16px;
+  padding: 14px 18px;
+  margin-bottom: 24px;
+}
+
+[data-theme='sakura'] .kawaii-tip-callout {
+  background: #fff8fb;
+  border: 1.5px solid #f7cadb;
+  box-shadow: 0 4px 14px rgba(184, 39, 99, 0.06);
+}
+
+.kawaii-tip-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+[data-theme='sakura'] .kawaii-tip-header {
+  color: #b82763;
+}
+
+.kawaii-tip-callout p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+[data-theme='sakura'] .kawaii-tip-callout p {
+  color: #784f60;
+}
+
+[data-theme='sakura'] .kawaii-tip-callout em {
+  color: #9f1239;
+  font-style: normal;
+  font-weight: 700;
+}
+
+[data-theme='sakura'] .kawaii-tip-callout code {
+  background: #ffe5f0;
+  color: #9f1239;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-weight: 700;
+  font-size: 12px;
+}
+
+/* Vocab Controls & Search */
+.vocab-controls-section {
+  margin-bottom: 24px;
+}
+
+.vocab-search-wrap {
+  position: relative;
+  margin-bottom: 14px;
+}
+
+.vocab-search-input {
+  width: 100%;
+  padding: 12px 16px;
+  border-radius: 12px;
+  border: 1.5px solid var(--line);
+  background: var(--card);
+  color: var(--text);
+  font-size: 14px;
+  box-sizing: border-box;
+  outline: none;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
+}
+
+[data-theme='sakura'] .vocab-search-input:focus {
+  border-color: #f472b6;
+  box-shadow: 0 0 0 3px rgba(244, 114, 182, 0.25);
+}
+
+.vocab-search-clear {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  font-size: 18px;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 4px;
+}
+
+.vocab-filters-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.vocab-filter-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.filter-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  margin-right: 4px;
+}
+
+.pill-filter-btn {
+  background: var(--card);
+  border: 1px solid var(--line);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 9999px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.pill-filter-btn:hover {
+  border-color: var(--green);
+}
+
+.pill-filter-btn.active {
+  background: var(--green);
+  color: #ffffff;
+  border-color: var(--green);
+  font-weight: 700;
+}
+
+[data-theme='sakura'] .pill-filter-btn:hover {
+  border-color: #f472b6;
+  background: #fff5f8;
+}
+
+[data-theme='sakura'] .pill-filter-btn.active {
+  background: linear-gradient(135deg, #ec4899, #b82763);
+  color: #ffffff;
+  border-color: #be185d;
+  box-shadow: 0 2px 8px rgba(184, 39, 99, 0.2);
+}
+
+.vocab-count-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  color: var(--muted);
+  margin-top: 8px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.btn-sm {
+  padding: 6px 14px;
+  font-size: 12px;
+  border-radius: 9999px;
+}
+
+.vocab-empty-msg {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 32px 16px;
+}
+
+/* Vocab Grid & Cards */
+.vocab-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 14px;
+  margin-bottom: 32px;
+}
+
+.vocab-card {
+  background: var(--card);
+  border: 1.5px solid var(--line);
+  border-radius: 14px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-sizing: border-box;
+  transition:
+    transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1),
+    box-shadow 0.2s;
+}
+
+.vocab-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
+}
+
+[data-theme='sakura'] .vocab-card {
+  border: 1.5px solid #ffd6e7;
+  background: #ffffff;
+}
+
+[data-theme='sakura'] .vocab-card:hover {
+  border-color: #f472b6;
+  box-shadow: 0 6px 18px rgba(244, 114, 182, 0.15);
+}
+
+.vocab-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.vocab-lesson-pill {
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--muted);
+  background: var(--bg);
+  padding: 2px 8px;
+  border-radius: 9999px;
+  border: 1px solid var(--line);
+}
+
+[data-theme='sakura'] .vocab-lesson-pill {
+  background: #fff0f5;
+  color: #b82763;
+  border-color: #fce7f3;
+}
+
+.vocab-type-chip {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 9999px;
+}
+
+.chip-verb {
+  background: #f5f3ff;
+  color: #6d28d9;
+  border: 1px solid #ddd6fe;
+}
+
+.chip-noun {
+  background: #fdf2f8;
+  color: #9d174d;
+  border: 1px solid #fbcfe8;
+}
+
+.chip-adj {
+  background: #fff7ed;
+  color: #c2410c;
+  border: 1px solid #fed7aa;
+}
+
+.chip-time {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+}
+
+.chip-other {
+  background: #f8fafc;
+  color: #475569;
+  border: 1px solid #e2e8f0;
+}
+
+.vocab-japanese-wrap {
+  font-size: 18px;
+  margin-bottom: 2px;
+}
+
+.vocab-kanji {
+  font-weight: 700;
+  color: var(--text);
+}
+
+[data-theme='sakura'] .vocab-kanji {
+  color: #881337;
+}
+
+.vocab-kana {
+  font-size: 14px;
+  color: var(--muted);
+  margin-left: 6px;
+}
+
+.vocab-romaji {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.vocab-swedish {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.vocab-english {
+  font-size: 12px;
+}
+
+.vocab-card-actions {
+  margin-top: auto;
+  padding-top: 6px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Kanji Grid & Cards */
+.kanji-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+  margin-bottom: 32px;
+}
+
+.kanji-card {
+  background: var(--card);
+  border: 1.5px solid var(--line);
+  border-radius: 14px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-sizing: border-box;
+  transition:
+    transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1),
+    box-shadow 0.2s;
+}
+
+.kanji-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
+}
+
+[data-theme='sakura'] .kanji-card {
+  border: 1.5px solid #ffd6e7;
+  background: #ffffff;
+}
+
+[data-theme='sakura'] .kanji-card:hover {
+  border-color: #f472b6;
+  box-shadow: 0 6px 18px rgba(244, 114, 182, 0.15);
+}
+
+.kanji-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.kanji-display {
+  font-size: 36px;
+  font-weight: 800;
+  color: var(--text);
+  line-height: 1;
+}
+
+[data-theme='sakura'] .kanji-display {
+  color: #881337;
+}
+
+.kanji-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.kanji-lesson-badge,
+.kanji-strokes-badge {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--muted);
+  background: var(--bg);
+  padding: 2px 6px;
+  border-radius: 9999px;
+  border: 1px solid var(--line);
+}
+
+[data-theme='sakura'] .kanji-lesson-badge,
+[data-theme='sakura'] .kanji-strokes-badge {
+  background: #fff0f5;
+  color: #b82763;
+  border-color: #fce7f3;
+}
+
+.kanji-meanings {
+  font-size: 14px;
+}
+
+.kanji-readings {
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.reading-row {
+  display: flex;
+  gap: 6px;
+}
+
+.reading-label {
+  font-weight: 700;
+  color: var(--muted);
+  width: 32px;
+}
+
+.kanji-compounds {
+  font-size: 11px;
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--line);
+}
+
+[data-theme='sakura'] .kanji-compounds {
+  border-top-color: #ffd6e7;
+}
+
+.compounds-label {
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.compounds-list {
+  margin: 4px 0 0;
+  padding-left: 16px;
+  list-style-type: disc;
+}
+
+.compounds-list li {
+  margin-bottom: 2px;
+}
+
+/* Particle Launch Box */
+.particle-launch-box {
+  border: 2px solid var(--line);
+  border-radius: 20px;
+  background: var(--card);
+  padding: 18px 24px;
+  margin-bottom: 24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  box-sizing: border-box;
+}
+
+[data-theme='sakura'] .particle-launch-box {
+  border: 2px dashed #f472b6;
+  background: linear-gradient(135deg, #fff0f5 0%, #fff8fb 100%);
+  box-shadow: 0 6px 20px rgba(184, 39, 99, 0.06);
+}
+
+.particle-launch-copy h2 {
+  margin: 0 0 4px;
+  font-size: 17px;
+}
+
+.particle-launch-copy p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.particle-launch-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* Particle Cards Section & Grid */
+.particle-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+  margin-bottom: 32px;
+}
+
+.particle-card {
+  background: var(--card);
+  border: 1.5px solid var(--line);
+  border-radius: 16px;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-sizing: border-box;
+  transition:
+    transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1),
+    box-shadow 0.2s;
+}
+
+.particle-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
+}
+
+[data-theme='sakura'] .particle-card {
+  border: 1.5px solid #ffd6e7;
+  background: #ffffff;
+}
+
+[data-theme='sakura'] .particle-card:hover {
+  border-color: #f472b6;
+  box-shadow: 0 6px 18px rgba(244, 114, 182, 0.15);
+}
+
+.particle-card-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.particle-char-chip {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  font-size: 22px;
+  font-weight: 800;
+  border-radius: 12px;
+  background: #edf3e9;
+  color: var(--green);
+  border: 1.5px solid #d1dfcb;
+  flex-shrink: 0;
+}
+
+[data-theme='sakura'] .particle-char-chip {
+  background: #ffe5f0;
+  color: #b82763;
+  border-color: #f472b6;
+}
+
+.particle-card-titles h3 {
+  margin: 0;
+  font-size: 15px;
+  color: var(--text);
+}
+
+[data-theme='sakura'] .particle-card-titles h3 {
+  color: #881337;
+}
+
+.particle-romaji {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.particle-desc {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text);
+  margin: 0;
+}
+
+.particle-contrast-note {
+  background: #f8faf8;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+[data-theme='sakura'] .particle-contrast-note {
+  background: #fff8fb;
+  border-color: #fce7f3;
+}
+
+.contrast-badge {
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--green);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+[data-theme='sakura'] .contrast-badge {
+  color: #b82763;
+}
+
+.particle-example-box {
+  background: var(--bg);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+[data-theme='sakura'] .particle-example-box {
+  background: #fff5f8;
+  border: 1px solid #ffd6e7;
+}
+
+.example-jp {
+  font-weight: 700;
+  color: var(--text);
+}
+
+[data-theme='sakura'] .example-jp {
+  color: #881337;
+}
+
+.card-footer-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 4px;
 }

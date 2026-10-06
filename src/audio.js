@@ -40,16 +40,17 @@ function updateAudioVolumes() {
   }
 }
 
+export const SOUND_FILES = {
+  tuturu: '/anime/sounds/tuturu.mp3',
+  nani: '/anime/sounds/nani.mp3',
+  ara_ara: '/anime/sounds/ara_ara.mp3',
+  wow: '/anime/sounds/wow.mp3',
+  arigato: '/anime/sounds/arigato.mp3',
+};
+
 function getAudio(type) {
   if (typeof window === 'undefined' || typeof Audio === 'undefined') return null;
-  const soundFiles = {
-    tuturu: '/anime/sounds/tuturu.mp3',
-    nani: '/anime/sounds/nani.mp3',
-    ara_ara: '/anime/sounds/wow.mp3',
-    wow: '/anime/sounds/wow.mp3',
-    arigato: '/anime/sounds/arigato.mp3',
-  };
-  const file = soundFiles[type];
+  const file = SOUND_FILES[type];
   if (!file) return null;
 
   if (!sounds[type]) {

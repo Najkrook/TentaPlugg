@@ -1,134 +1,126 @@
-# Handoff Report: Milestone M1 (R1: Kontrastiv felåterkoppling & Snabbguide)
+# Handoff Report: Worker M1 (Milestone 1 — Mascot & Interactive Dialogue System)
 
-**Agent**: `worker_m1`  
-**Working Directory**: `.agents/teamwork/worker_m1`  
-**Recipient**: Orchestrator (`caec6291-b7f4-4115-a415-2741cb85c00d`)  
-**Date**: 2026-10-04  
-**Type**: Hard Handoff (Milestone M1 Implementation & Verification Complete)
+**Date**: 2026-10-06  
+**Agent**: Worker M1  
+**Milestone**: Milestone 1 (R1: Sidebar Peeking Mascot, R3: Interactive Mascot Dialogue, Audio Fix)  
+**Parent**: 11adfdec-5f2b-4034-94ef-516c769b159f  
 
 ---
 
 ## 1. Observation
 
-1. **Bug in initial `src/engine.js` on alternative valid answers**:
-   - Initial code evaluated: `const correctAns = q.answers?.[0] || ''; if (cleanAns === correctAns) return null;`.
-   - On question `l5-10` (`answers: ['に', 'へ']`), submitting `'へ'` failed the index 0 check.
-   - On question `b-6` (`topic: 'Böjningar'`, `answers: ['しずかじゃないです', 'しずかではありません', 'しずかじゃありません']`), submitting the valid alternative answer `'しずかではありません'` failed `cleanAns === correctAns` and returned an inflection error message on a correct answer.
+1. **`src/audio.js:48` Audio Mapping**:
+   Previously in `src/audio.js`:
+   ```javascript
+   const soundFiles = {
+     tuturu: '/anime/sounds/tuturu.mp3',
+     nani: '/anime/sounds/nani.mp3',
+     ara_ara: '/anime/sounds/wow.mp3',
+     wow: '/anime/sounds/wow.mp3',
+     arigato: '/anime/sounds/arigato.mp3',
+   };
+   ```
+   `ara_ara` was pointing to `/anime/sounds/wow.mp3` instead of `/anime/sounds/ara_ara.mp3`.
+   After update: `SOUND_FILES.ara_ara` points to `/anime/sounds/ara_ara.mp3`. `tests/audio.test.js` verified the physical file exists (177 KB, >10KB) and that `SOUND_FILES.ara_ara === '/anime/sounds/ara_ara.mp3'`.
 
-2. **Common distractor coverage gaps in initial `src/engine.js`**:
-   - 10 common pairwise distractor confusions were missing rules: e.g. `が` when `を` is expected, `で` when `を` is expected, `を` when `で` is expected, `は` when `も` is expected, `は` when `の` is expected, `の` when `は` is expected, `に` when `と` is expected, and particles chosen when `×` (ingen partikel) is expected.
+2. **Study Room Focus Panel Mascot (`src/views/home.js:103-125`)**:
+   Previously had static hardcoded text:
+   `<span>先輩、今日もいっしょにがんばろう！✨</span>`
+   `<small>Kämpa på, senpai! 💕</small>`
+   `@click=${() => playAnimeSound('arigato', ctx.theme)}`
+   After update: speech bubble and avatar button are wired to `studyQuote` and `onPokeStudy`, cycling quotes dynamically through `MASCOT_QUOTES` and triggering cheerful sound feedback via `pokeStudyMascot`.
 
-3. **Destructive navigation in `src/main.js`**:
-   - `navigate('guide')` explicitly executed `session = null; view = 'guide'; render(true);`, destroying active session progress if a user attempted to check grammar rules during practice or exam.
+3. **Sidebar Peeking Mascot (`src/main.js:310-342`)**:
+   Previously absent from `<aside class="sidebar">`.
+   After update: `<div class="anime-figure sidebar-chibi-card">` is rendered conditionally inside `.sidebar` between `<nav>` and `.side-bottom` using `/anime/mascot_peek.jpg`. Contains `.sidebar-chibi-img-wrap` and `.sidebar-chibi-bubble` with interactive click and keydown handlers (`pokeSidebarMascot`).
 
-4. **Missing anchors and modularity in `src/views/guide.js`**:
-   - `guideView` rendered raw articles without `id`, `data-guide-id`, or modular template exports for embedding in a modal overlay.
+4. **Sidebar Scrolling CSS (`src/style.css:199-216`)**:
+   `.sidebar` now includes:
+   ```css
+   overflow-y: auto;
+   overflow-x: hidden;
+   scrollbar-width: thin;
+   ```
+   `[data-theme='sakura'] .sidebar-chibi-card` now has `cursor: pointer;`, `user-select: none;`, `:focus-visible`, and `:active` styling.
+   Lines 2495–2508 (`:root:not([data-theme='sakura']) .anime-figure`) remain 100% intact.
 
-5. **Test suite and build status**:
-   - `npm test` runs `node --test --test-isolation=none tests/*.test.js`.
-   - Baseline: 41 passing tests (24 original + 17 requirements).
-   - Post-implementation: 44 passing tests (24 original + 17 requirements + 3 new engine unit test suites). 0 failures, execution time 116ms.
-   - `npm run build` succeeds cleanly with exit code 0, bundling all assets without compilation errors.
+5. **Test and Build Executions**:
+   - `npm test`: 133 passing tests (0 failures, 292ms).
+   - `npm run build`: Vite build completed in 1.61s with exit code 0.
+   - `npx playwright test tests/e2e/mascot_dialogue.spec.js`: 2 passed (0 errors).
+   - `npx playwright test tests/e2e/anime_sound.spec.js`: 6 passed (0 errors).
+   - `npx playwright test tests/e2e/theme_stress.spec.js`: 14 passed (0 errors).
 
 ---
 
 ## 2. Logic Chain
 
-1. **Addressing Observation 1**:
-   - Replaced index-0 string equality with `if (correct(q, userAnswer)) return null;` at the beginning of `getContrastiveFeedback` in `src/engine.js`.
-   - Because `correct()` performs normalization and checks every element in `q.answers`, any valid answer (including alternative particle answers like `['に', 'へ']` and normalized spacing) returns `null` immediately and never triggers error feedback.
+1. **Audio Mapping Correction**:
+   - *Observation*: `src/audio.js` mapped `ara_ara` to `/anime/sounds/wow.mp3`, while physical file `public/anime/sounds/ara_ara.mp3` exists.
+   - *Inference*: Correcting `SOUND_FILES.ara_ara` to `/anime/sounds/ara_ara.mp3` enables authentic audio playback for quotes using `ara_ara`.
 
-2. **Addressing Observation 2**:
-   - Expanded particle distractor handling in `src/engine.js` using `hasAns(ans) => (q.answers || []).some(a => normalize(a) === normalize(ans))`.
-   - Added pedagogical explanations and mapped all pairs to valid guide IDs:
-     - `で` vs `に`/`へ`, `に` vs `で`, `へ` vs `で`, `を` vs `で` -> `guideId: 'ni-de'`
-     - `は` vs `が`, `が` vs `は`, `を` vs `が`, `が` vs `を`, `の` vs `は` -> `guideId: 'wa-ga'`
-     - `を` vs `に`, `に` vs `を`, `で` vs `を`, `と` vs `の`, `の` vs `と`, `は` vs `の`, `は` vs `も`, `も` vs `は`, `に` vs `と` -> `guideId: 'wo-to-no-mo'`
-     - Any particle when `×` is expected -> `guideId: 'no-particle'`
-     - `×` when a particle is expected -> appropriate guideId based on missing particle (`ni-de`, `wa-ga`, `wo-to-no-mo`)
-     - Topic `Böjningar` -> `adjectives`, Topic `Moror & stavelser` -> `moras`.
+2. **Dialogue Engine Decoupling**:
+   - *Observation*: Requirements R1 and R3 both involve mascot speech bubbles and quotes.
+   - *Inference*: Defining `src/mascot-dialogue.js` provides a single source of truth for `MASCOT_QUOTES`, cycling state, and poke interactions, allowing both the study mascot (`home.js`) and sidebar mascot (`main.js`) to share catalogue data while maintaining independent or coordinated rotation.
 
-3. **Addressing Observation 3 & 4**:
-   - In `src/views/guide.js`:
-     - Implemented `resolveGuideId(id)` to normalize and handle aliases.
-     - Implemented `guideCards(ctx, { highlightId })` adding `id=${g.id}`, `data-guide-id=${g.id}`, anchor `<a id="guide-${g.id}"></a>`, and `.guide-highlight` with `.guide-badge`.
-     - Implemented `guideModalTemplate(ctx, { guideId, onClose })` featuring a header, close button, scrollable body, and "Återgå till övningen" footer.
-   - In `src/main.js`:
-     - Implemented `openGuideModal(guideId)` using native `<dialog class="guide-modal">`.
-     - Non-destructive execution: does not call `navigate()` or reset `session`.
-     - Closes cleanly on ESC key (`'cancel'`), backdrop click, or close button, restoring focus to previous active element and stopping any audio with `stopSpeech()`.
-     - Programmatically scrolls and highlights the targeted card using `requestAnimationFrame`.
-     - Exposed `openGuideModal` via `ctx` and globally on `window`.
+3. **Starting Quote Compatibility**:
+   - *Observation*: Existing test suites check for initial text and behavior without throwing errors.
+   - *Inference*: Setting quote index 0 to `先輩、今日もいっしょにがんばろう！✨` / `( ๑>ᴗ<๑ )` / `Kämpa på, senpai! 💕` with sound `arigato` ensures zero regressions for initial render state.
 
-4. **Integration in `src/views/session.js`**:
-   - Imported `getContrastiveFeedback`.
-   - When `feedback && !q.self && s.grades[q.id] === false`, invoked `getContrastiveFeedback(q, value)`.
-   - Rendered `contrastiveCallout(contrastive, value, q.answers, ctx)` containing:
-     - Comparison chips: student's choice (`cleanUser`) vs correct particle (`answers.join(' / ')`).
-     - Explanation text formatted with `languageText(...)` wrapping Japanese text in `<span lang="ja">`.
-     - `"Öppna snabbguide"` button that calls `ctx.openGuideModal(contrastive.guideId)`.
+4. **Dual-Layer Hard-Hiding Defense**:
+   - *Observation*: Stress test `M3-6` string-asserts `:root:not([data-theme="sakura"]) .anime-figure` with `display: none !important;` in `src/style.css:2495-2508`.
+   - *Inference*: Applying class `.anime-figure` to `.sidebar-chibi-card` and wrapping it in `${state.theme === 'sakura' ? html`...` : ''}` ensures that both Tier 1 (DOM omission) and Tier 2 (CSS hard-hiding) completely prevent any mascot leakage into Classic mode.
 
-5. **Styling in `src/style.css`**:
-   - Added styles for `dialog.guide-modal`, translucent backdrop blur, sticky header/footer, `.guide-highlight`, `.guide-badge`.
-   - Added styles for `.contrastive-box` and `.contrastive-callout` with high contrast colors:
-     - Background `#ffffff`, border `#fae1c3`, accent bar `4px solid #d97706`.
-     - Text `#243e36` on `#ffffff` (contrast 9.8:1 > WCAG AAA).
-     - Wrong chip `#991b1b` on `#fde8e8` (7.2:1 > WCAG AAA).
-     - Correct chip `#137333` on `#e6f4ea` (6.1:1 > WCAG AA).
-     - Button `#ffffff` on `#183f37` (>9:1 > WCAG AAA).
-   - Added responsive adjustments for mobile viewports (`max-width: 760px`).
-
-6. **Unit test verification in `tests/engine.test.js`**:
-   - Added 3 test suites verifying:
-     - Correct answers return `null` (single answer, multi-answer `l5-10`, inflection `b-6`, whitespace/punctuation, empty inputs).
-     - All pairwise particle distractors return pedagogical explanations and correct `guideId`.
-     - Custom contrastive overrides, non-particle topics, and unknown distractors.
+5. **Responsiveness on Desktop & Mobile**:
+   - *Observation*: `.sidebar` is hidden on viewports <= 760px via `@media (max-width: 760px) { .sidebar { display: none; } }`. On short desktop viewports (<700px), fixed sidebars can clip content.
+   - *Inference*: Adding `overflow-y: auto; overflow-x: hidden; scrollbar-width: thin;` allows desktop users on short viewports to smoothly scroll the sidebar, while mobile viewports cleanly hide the sidebar without horizontal overflow.
 
 ---
 
 ## 3. Caveats
 
-- **No caveats**: All tasks specified in `ORIGINAL_REQUEST.md` §R1 and the dispatch prompt have been implemented with genuine logic and verified across all tests.
+- **Web Audio autoplay policy**: In browser environments without prior user gesture, `play()` returns a Promise that may be rejected by autoplay policies. `playAnimeSound` in `src/audio.js` already catches and swallows this gracefully (`playPromise.catch(() => {})`).
+- **Mobile Viewport Sidebar**: In mobile viewports (width <= 760px), `.sidebar` is hidden by CSS (`display: none`), so the sidebar peeking mascot is exclusively visible on desktop viewports (>760px). The study mascot in `home.js` is responsive and fully interactive on both desktop and mobile viewports.
+- No other caveats.
 
 ---
 
 ## 4. Conclusion
 
-Milestone M1 (R1: Kontrastiv felåterkoppling & Snabbguide-integration) is complete, robust, and verified:
-1. Students receive pedagogical contrastive explanations and particle comparison chips on incorrect particle attempts.
-2. Students can open and read relevant rules in Snabbguiden directly during an active session via `<dialog class="guide-modal">` with 100% preservation of session state.
-3. Valid answers (including alternative answers and normalized inputs) never trigger error feedback.
-4. All 44 tests pass with zero regressions, and Vite builds cleanly.
+Milestone 1 is completely implemented, genuine, and verified:
+- `ara_ara` audio mapping points correctly to `/anime/sounds/ara_ara.mp3`.
+- `src/mascot-dialogue.js` provides 8 joyful study quotes with kaomojis, Swedish translations, and 4 audio cues (`arigato`, `tuturu`, `wow`, `ara_ara`).
+- Interactive study room mascot and sidebar peeking mascot cycle dialogue quotes and trigger cheerful sounds on click/keydown.
+- Sidebar mascot card is rendered in Sakura mode using `/anime/mascot_peek.jpg` with full hard-hiding compliance in Classic mode.
+- All 133 unit and stress tests pass (`npm test`), production build succeeds (`npm run build` exit code 0), and all relevant Playwright E2E suites pass with zero regressions.
 
 ---
 
 ## 5. Verification Method
 
-1. **Run full unit & requirement test suite**:
+To independently verify the implementation:
+
+1. **Run Full Test Suite**:
    ```bash
    npm test
    ```
-   *Expected outcome*: 44 passing tests, 0 failures, exit code 0.
-   *Verbatim result*:
-   ```
-   ℹ tests 44
-   ℹ suites 0
-   ℹ pass 44
-   ℹ fail 0
-   ℹ duration_ms 116.6597
-   ```
+   *Expected output*: 133 passed, 0 failed, 0 skipped.
 
-2. **Run production build**:
+2. **Run Production Build**:
    ```bash
    npm run build
    ```
-   *Expected outcome*: Clean Vite build, exit code 0.
+   *Expected output*: Vite build completes with exit code 0 and generated assets in `dist/`.
 
-3. **Check distractor feedback and multi-answer behavior**:
+3. **Run E2E Playwright Suite**:
    ```bash
-   node -e "import('./src/engine.js').then(async eng => { const data = await import('./src/data.js'); const qMulti = { topic: 'Partiklar', answers: ['に', 'へ'] }; console.assert(eng.getContrastiveFeedback(qMulti, 'に') === null, 'Multi-answer に failed'); console.assert(eng.getContrastiveFeedback(qMulti, 'へ') === null, 'Multi-answer へ failed'); const fb = eng.getContrastiveFeedback(qMulti, 'で'); console.assert(fb && fb.guideId === 'ni-de', 'Distractor で failed'); console.log('Engine verification passed'); })"
+   npx playwright test tests/e2e/mascot_dialogue.spec.js tests/e2e/anime_sound.spec.js tests/e2e/theme_stress.spec.js
    ```
-   *Expected outcome*: `Engine verification passed`.
+   *Expected output*: All tests pass across desktop and mobile browsers.
 
-4. **Invalidation condition**:
-   - Invalidation occurs if opening or closing the Quick Guide modal resets `session`, navigates away from the question index, or causes any unit test in `tests/*.test.js` or `test/*.test.js` to fail.
+4. **Inspect Files**:
+   - `src/audio.js`: Check `SOUND_FILES.ara_ara === '/anime/sounds/ara_ara.mp3'`.
+   - `src/mascot-dialogue.js`: Check 8 quotes, getters, and poke functions.
+   - `src/views/home.js`: Check study mascot quote rendering and `onPokeStudy` handler.
+   - `src/main.js`: Check sidebar chibi card between `<nav>` and `.side-bottom`, conditioned on `state.theme === 'sakura'`.
+   - `src/style.css`: Check `.sidebar` has `overflow-y: auto; overflow-x: hidden; scrollbar-width: thin;` and lines 2495–2508 are untouched.
