@@ -40,25 +40,13 @@ let activeUserUid = null;
 let unloadRegistered = false;
 let lobbyBusy = false;
 let viewEpoch = 0;
-let hostTimeOffset = 0;
-
-function updateHostTimeOffset(data) {
-  if (!data) return;
-  if (data.host?.uid === activeUserUid) {
-    hostTimeOffset = 0;
-  } else if (data.updatedAt) {
-    hostTimeOffset = data.updatedAt - Date.now();
-  }
-}
-
 function getSyncedNow() {
-  return Date.now() + hostTimeOffset;
+  return Date.now();
 }
 
 export function resetMultiplayerView(uid = null) {
   const leaving = activeLobbyId && uid ? leaveLobby(activeLobbyId, uid) : Promise.resolve();
   viewEpoch++;
-  hostTimeOffset = 0;
   if (lobbyUnsub) {
     lobbyUnsub();
     lobbyUnsub = null;
@@ -98,7 +86,6 @@ function watchLobby(ctx, code) {
         feedbackMessage = 'Lobbyn har stängts.';
       } else {
         currentLobbyData = data;
-        updateHostTimeOffset(data);
       }
       ctx.render();
     },
@@ -154,16 +141,16 @@ export function multiplayerView(ctx) {
       const isHost = currentLobbyData.host?.uid === activeUserUid;
       const roundExpired =
         game.status === 'playing' &&
-        ((game.firstAnswerAt && now > game.firstAnswerAt + ROUND_TIME_MS) ||
-          (game.roundStartTime && now > game.roundStartTime + 60000));
+        ((game.firstAnswerAt && now >= game.firstAnswerAt + ROUND_TIME_MS) ||
+          (game.roundStartTime && now >= game.roundStartTime + 60000));
       const pauseExpired = game.status === 'round_end' && now >= game.nextRoundAt;
-      // Host triggers advance immediately; guests only act as a safety fallback (+4s delay)
+      // Host triggers advance immediately; guests only act as a safety fallback (+3s delay)
       const due =
         (roundExpired &&
           (isHost ||
-            (game.firstAnswerAt && now > game.firstAnswerAt + ROUND_TIME_MS + 4000) ||
-            now > game.roundStartTime + 64000)) ||
-        (pauseExpired && (isHost || now >= game.nextRoundAt + 3000));
+            (game.firstAnswerAt && now >= game.firstAnswerAt + ROUND_TIME_MS + 3000) ||
+            now >= game.roundStartTime + 63000)) ||
+        (pauseExpired && (isHost || now >= game.nextRoundAt + 2000));
 
       if (activeLobbyId && due && !advancing) {
         advancing = true;

@@ -32,19 +32,14 @@ if (emulated) {
   connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
   connectFirestoreEmulator(db, '127.0.0.1', 8080);
 }
-export function preferRedirect(platform = navigator) {
-  return (
-    /iPhone|iPad|iPod/.test(platform.userAgent) ||
-    (/Macintosh/.test(platform.userAgent) && platform.maxTouchPoints > 1) ||
-    window.matchMedia('(display-mode: standalone)').matches
-  );
+export function preferRedirect() {
+  return false;
 }
 export async function login(beforeRedirect) {
   const redirect = async () => {
-    beforeRedirect();
+    beforeRedirect?.();
     await signInWithRedirect(auth, new GoogleAuthProvider());
   };
-  if (preferRedirect()) return redirect();
   try {
     return await signInWithPopup(auth, new GoogleAuthProvider());
   } catch (error) {
@@ -52,8 +47,9 @@ export async function login(beforeRedirect) {
       ['auth/popup-blocked', 'auth/operation-not-supported-in-this-environment'].includes(
         error.code,
       )
-    )
+    ) {
       return redirect();
+    }
     throw error;
   }
 }

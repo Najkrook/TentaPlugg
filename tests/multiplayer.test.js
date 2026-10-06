@@ -481,3 +481,38 @@ test('Omitted answer penalty: active players without answer receive -50 points u
   assert.equal(closed.answers[0].charlie.timedOut, true);
   assert.equal(closed.answers[0].charlie.pointsAwarded, TIMEOUT_PENALTY);
 });
+
+test('Round advancement lifecycle: advances to round_end after 8s and then to question 2', () => {
+  const game = {
+    questions: [
+      { id: 'q1', prompt: 'Fråga 1', choices: ['A', 'B'], correctAnswer: 'A' },
+      { id: 'q2', prompt: 'Fråga 2', choices: ['A', 'B'], correctAnswer: 'B' },
+    ],
+    currentRoundIndex: 0,
+    roundStartTime: 1000,
+    playerUids: ['alice', 'bob'],
+    scores: { alice: 0, bob: 0 },
+    answers: {},
+    status: 'playing',
+  };
+
+  // Alice answers at t=2000 -> starts 8s countdown
+  const afterAlice = evaluateRound(game, 'alice', 'A', 2000);
+  assert.equal(afterAlice.status, 'playing');
+  assert.equal(afterAlice.firstAnswerAt, 2000);
+
+  // At t=10000 (8s after first answer), round expires and closes
+  const roundEnded = closeRound(afterAlice, 10000);
+  assert.equal(roundEnded.status, 'round_end');
+  assert.equal(roundEnded.roundEndAt, 10000);
+  assert.equal(roundEnded.nextRoundAt, 12000);
+  assert.equal(roundEnded.currentRoundIndex, 0);
+
+  // At t=12000 (after 2s pause), advanceToNextRound transitions to round 1
+  const round2 = advanceToNextRound(roundEnded, 12000);
+  assert.equal(round2.status, 'playing');
+  assert.equal(round2.currentRoundIndex, 1, 'Advances to question 2');
+  assert.equal(round2.firstAnswerAt, null, 'firstAnswerAt reset for new round');
+  assert.equal(round2.roundStartTime, 12000);
+});
+

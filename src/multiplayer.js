@@ -921,9 +921,7 @@ export async function submitPlayerAnswer(lobbyId, uid, roundIndex, selectedAnswe
     if (!data.game) return null;
 
     const game = data.game;
-    const localNow = Date.now();
-    const skew = data.updatedAt ? data.updatedAt - localNow : 0;
-    const now = Math.max(game.roundStartTime || 0, localNow + skew);
+    const now = Math.max(game.roundStartTime || 0, Date.now());
 
     if (game.currentRoundIndex !== roundIndex) return null;
     const updatedGame = evaluateRound(game, uid, selectedAnswer, now, data.players);
@@ -966,9 +964,7 @@ export async function advanceRoundIfDue(lobbyId) {
     const data = snap.data();
     if (!data.game) return;
 
-    const localNow = Date.now();
-    const skew = data.updatedAt ? data.updatedAt - localNow : 0;
-    const now = localNow + skew;
+    const now = Date.now();
     const game = data.game;
 
     if (game.status === 'round_end' && game.nextRoundAt && now >= game.nextRoundAt) {
@@ -980,8 +976,8 @@ export async function advanceRoundIfDue(lobbyId) {
       });
     } else if (
       game.status === 'playing' &&
-      ((game.firstAnswerAt && now - game.firstAnswerAt > ROUND_TIME_MS) ||
-        (game.roundStartTime && now - game.roundStartTime > 60000))
+      ((game.firstAnswerAt && now - game.firstAnswerAt >= ROUND_TIME_MS) ||
+        (game.roundStartTime && now - game.roundStartTime >= 60000))
     ) {
       const playersMap = data.players || {};
       const updated = closeRound(game, now, playersMap);
