@@ -1,6 +1,8 @@
 import { EXERCISE_REFERENCE_DATE } from './config.js';
 import { extraQuestions } from './extra-content.js';
+import { l1l5Questions } from './l1l5-data.js';
 import { enrichQuestion } from './pedagogy.js';
+export { l1l5Questions };
 export const topics = [
   'Partiklar',
   'Böjningar',
@@ -835,7 +837,7 @@ export const guides = [
   },
 ];
 
-questions.push(...extraQuestions);
+questions.push(...extraQuestions, ...l1l5Questions);
 for (const q of questions) {
   q.section = q.id.replace(/^.*?-/, '').split('-')[0];
   if (/^(gema70-5-|japc11-5\.1-)/.test(q.id)) q.topic = 'Moror & stavelser';

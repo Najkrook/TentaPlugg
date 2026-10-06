@@ -212,6 +212,26 @@ export function homeView(ctx) {
             ${icon('ChevronRight')}
           </button>`;
         })}<button
+          class="topic-card l1l5-card"
+          data-topic-card="l1l5"
+          @click=${() => ctx.start('L1-L5')}
+        >
+          <span class="topic-letter special" lang="ja">復</span>
+          <div>
+            <h3>L1–L5 Repetition</h3>
+            <p>
+              ${questions.filter((q) => q.set === 'l1l5').length} frågor ·
+              ${questions.filter((q) => q.set === 'l1l5' && state.stats[q.id]?.ok).length} rätt
+              senast
+            </p>
+            <div class="mini-track">
+              <span
+                style="width:${(questions.filter((q) => q.set === 'l1l5' && state.stats[q.id]?.ok).length / Math.max(1, questions.filter((q) => q.set === 'l1l5').length)) * 100}%"
+              ></span>
+            </div>
+          </div>
+          ${icon('ChevronRight')}</button
+        ><button
           class="topic-card repeat"
           @click=${() => ctx.start('Alla', { wrong: true, extra: true })}
         >

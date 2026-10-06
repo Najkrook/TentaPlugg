@@ -609,6 +609,9 @@ async function start(topic, options = {}) {
   const count = isAllDue ? Infinity : typeof chosenCount === 'number' ? chosenCount : 10;
 
   let candidateBank = questions;
+  if (topic === 'L1-L5') {
+    candidateBank = candidateBank.filter((q) => q.set === 'l1l5');
+  }
   if (options.wrong)
     candidateBank = candidateBank.filter((q) => state.stats[q.id] && !state.stats[q.id].ok);
   let bank = dueOnly
@@ -644,7 +647,13 @@ async function start(topic, options = {}) {
   flush();
   session = createSession(
     ids,
-    options.wrong ? 'Repetition av misstag' : topic === 'Alla' ? 'Blandad träning' : topic,
+    options.wrong
+      ? 'Repetition av misstag'
+      : topic === 'Alla'
+        ? 'Blandad träning'
+        : topic === 'L1-L5'
+          ? 'L1–L5 Repetition (Hayashi)'
+          : topic,
   );
   persist(true);
   render(true);

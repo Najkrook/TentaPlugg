@@ -381,7 +381,11 @@ export function selectPractice(
   return bank
     .filter(
       (q) =>
-        (topic === 'Alla' ? q.topic !== 'Kana' : q.topic === topic) &&
+        (topic === 'Alla'
+          ? q.topic !== 'Kana'
+          : topic === 'L1-L5'
+            ? q.set === 'l1l5'
+            : q.topic === topic) &&
         (extra || !stats[q.id] || (stats[q.id].dueAt ?? 0) <= now),
     )
     .map((q) => ({ q, s: stats[q.id] }))

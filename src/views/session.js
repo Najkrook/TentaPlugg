@@ -117,24 +117,26 @@ export function sessionView(ctx) {
             ? html`<div class="choices">
                 ${q.choices.map((c) => html`<button class="choice ${value === c ? 'selected' : ''} ${feedback && q.answers?.includes(c) ? 'right' : ''}" lang=${q.choiceLang || 'sv'} aria-pressed=${value === c} aria-disabled=${feedback ? 'true' : 'false'} @click=${() => !feedback && ctx.answer(c)}>${c}</button>`)}
               </div>`
-            : html`<label class="answer-label" for="answer">Ditt svar</label
-                ><textarea
-                  id="answer"
-                  rows=${q.self ? 5 : 2}
-                  lang=${q.answerLang || 'sv'}
-                  .value=${live(value)}
-                  ?readonly=${feedback}
-                  maxlength="3000"
-                  placeholder=${q.answerLang === 'ja' ? 'Skriv med ditt japanska tangentbord…' : 'Skriv ditt svar här…'}
-                  autocapitalize="off"
-                  spellcheck="false"
-                  @input=${(e) => ctx.answer(e.target.value, false)}
-                  @compositionstart=${() => ctx.setComposing(true)}
-                  @compositionend=${(e) => {
-                    ctx.setComposing(false);
-                    ctx.answer(e.target.value, false);
-                  }}
-                ></textarea>`
+            : q.tiles && !q.self
+              ? wordScramblerTemplate(ctx, q, value, feedback)
+              : html`<label class="answer-label" for="answer">Ditt svar</label
+                  ><textarea
+                    id="answer"
+                    rows=${q.self ? 5 : 2}
+                    lang=${q.answerLang || 'sv'}
+                    .value=${live(value)}
+                    ?readonly=${feedback}
+                    maxlength="3000"
+                    placeholder=${q.answerLang === 'ja' ? 'Skriv med ditt japanska tangentbord…' : 'Skriv ditt svar här…'}
+                    autocapitalize="off"
+                    spellcheck="false"
+                    @input=${(e) => ctx.answer(e.target.value, false)}
+                    @compositionstart=${() => ctx.setComposing(true)}
+                    @compositionend=${(e) => {
+                      ctx.setComposing(false);
+                      ctx.answer(e.target.value, false);
+                    }}
+                  ></textarea>`
         }
         ${
           feedback
@@ -420,4 +422,115 @@ function resultView(ctx) {
       })}
     </div>
   </section>`;
+}
+
+function wordScramblerTemplate(ctx, q, value, feedback) {
+  const s = ctx.session;
+  s.scramblerState ||= {};
+  if (!Array.isArray(s.scramblerState[q.id])) {
+    s.scramblerState[q.id] = [];
+    if (value) {
+      const tiles = q.tiles || [];
+      let rem = value;
+      const used = new Set();
+      while (rem.length > 0) {
+        let matched = false;
+        for (let i = 0; i < tiles.length; i++) {
+          if (!used.has(i) && rem.startsWith(tiles[i])) {
+            s.scramblerState[q.id].push(i);
+            used.add(i);
+            rem = rem.slice(tiles[i].length);
+            matched = true;
+            break;
+          }
+        }
+        if (!matched) break;
+      }
+    }
+  }
+
+  const placedIndices = s.scramblerState[q.id];
+  const tiles = q.tiles || [];
+
+  const onPlace = (idx) => {
+    if (feedback) return;
+    placedIndices.push(idx);
+    const text = placedIndices.map((i) => tiles[i]).join('');
+    ctx.answer(text, true);
+  };
+
+  const onRemove = (pos) => {
+    if (feedback) return;
+    placedIndices.splice(pos, 1);
+    const text = placedIndices.map((i) => tiles[i]).join('');
+    ctx.answer(text, true);
+  };
+
+  const onClear = () => {
+    if (feedback) return;
+    s.scramblerState[q.id] = [];
+    ctx.answer('', true);
+  };
+
+  return html`
+    <div class="word-scrambler" role="region" aria-label="Bygg meningen med ordbrickor">
+      <div class="scrambler-header">
+        <span class="scrambler-prompt-hint"
+          >${icon('Move')} Klicka på brickorna i rätt ordning:</span
+        >
+        ${
+          placedIndices.length > 0 && !feedback
+            ? html`<button type="button" class="text-button scrambler-clear-btn" @click=${onClear}>
+                Rensa
+              </button>`
+            : ''
+        }
+      </div>
+      <div
+        class="constructed-sentence ${feedback ? (s.grades[q.id] ? 'is-correct' : 'is-wrong') : ''}"
+        lang="ja"
+        role="status"
+        aria-label="Byggd mening"
+      >
+        ${
+          placedIndices.length === 0
+            ? html`<span class="scrambler-placeholder muted"
+                >Klicka på orden nedan för att bygga meningen…</span
+              >`
+            : placedIndices.map(
+                (idx, pos) => html`
+                  <button
+                    type="button"
+                    class="placed-chip"
+                    ?disabled=${feedback}
+                    title="Klicka för att ta bort ordet"
+                    aria-label="${tiles[idx]}, klicka för att ta bort"
+                    @click=${() => onRemove(pos)}
+                  >
+                    ${tiles[idx]}
+                    ${!feedback ? html`<span class="chip-x" aria-hidden="true">×</span>` : ''}
+                  </button>
+                `,
+              )
+        }
+      </div>
+      <div class="tiles-pool" lang="ja" role="group" aria-label="Tillgängliga ordbrickor">
+        ${tiles.map((text, idx) => {
+          const placed = placedIndices.includes(idx);
+          return html`
+            <button
+              type="button"
+              class="tile-btn ${placed ? 'is-placed' : ''}"
+              ?disabled=${placed || feedback}
+              aria-pressed=${placed}
+              aria-label="${text}${placed ? ' (placerad)' : ''}"
+              @click=${() => onPlace(idx)}
+            >
+              ${text}
+            </button>
+          `;
+        })}
+      </div>
+    </div>
+  `;
 }

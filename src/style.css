@@ -6245,3 +6245,200 @@ html:not([data-theme='sakura']) .sound-slider,
 [data-theme='sakura'] .particle-comparison-label {
   color: #8a6270;
 }
+
+/* ============================================================
+   Word Scrambler / Token Arrangement Widget
+   ============================================================ */
+.word-scrambler {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 16px 0 24px;
+}
+
+.scrambler-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.scrambler-prompt-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  color: var(--text-muted, #556b62);
+  font-weight: 500;
+}
+
+.scrambler-clear-btn {
+  font-size: 13px;
+  padding: 4px 8px;
+  color: var(--text-muted, #556b62);
+}
+
+.constructed-sentence {
+  min-height: 60px;
+  background: var(--surface, #fff);
+  border: 2px dashed #b5c7b9;
+  border-radius: 12px;
+  padding: 10px 14px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.2s ease;
+  font-family: 'Noto Sans JP', sans-serif;
+  font-size: 18px;
+}
+
+[data-theme='sakura'] .constructed-sentence {
+  border-color: #f3b0c9;
+  background: #fff;
+}
+
+.constructed-sentence.is-correct {
+  border-style: solid;
+  border-color: #7da169;
+  background: #f2f8ed;
+}
+
+[data-theme='sakura'] .constructed-sentence.is-correct {
+  border-color: #10b981;
+  background: #ecfdf5;
+}
+
+.constructed-sentence.is-wrong {
+  border-style: solid;
+  border-color: #d97706;
+  background: #fffbeb;
+}
+
+.scrambler-placeholder {
+  font-size: 15px;
+  font-style: italic;
+  font-family: inherit;
+  color: var(--text-muted, #8a9c90);
+}
+
+.placed-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  border: 1px solid #9eb39f;
+  background: #eaf2e8;
+  color: var(--green, #183f37);
+  font-size: 17px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    transform 0.15s ease,
+    background 0.15s ease;
+  font-family: 'Noto Sans JP', sans-serif;
+}
+
+.placed-chip:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: #d8e8d5;
+}
+
+.placed-chip .chip-x {
+  font-size: 14px;
+  line-height: 1;
+  color: #6a8270;
+}
+
+[data-theme='sakura'] .placed-chip {
+  background: #fdf2f8;
+  border-color: #f472b6;
+  color: #9d174d;
+}
+
+[data-theme='sakura'] .placed-chip:hover:not(:disabled) {
+  background: #fce7f3;
+  transform: translateY(-1px) scale(1.02);
+}
+
+.tiles-pool {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px;
+  background: var(--bg, #f4f7f2);
+  border-radius: 12px;
+}
+
+[data-theme='sakura'] .tiles-pool {
+  background: #fff0f5;
+  border: 1px solid #ffd6e7;
+}
+
+.tile-btn {
+  padding: 10px 18px;
+  border-radius: 10px;
+  border: 1px solid #c9d8c8;
+  background: #fff;
+  color: var(--green, #183f37);
+  font-size: 18px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  transition: all 0.15s ease;
+  font-family: 'Noto Sans JP', sans-serif;
+}
+
+.tile-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  border-color: #8da68c;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.08);
+}
+
+.tile-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.tile-btn.is-placed {
+  opacity: 0.3;
+  cursor: default;
+  box-shadow: none;
+  background: #eef2ec;
+  border-style: dashed;
+}
+
+[data-theme='sakura'] .tile-btn {
+  color: #831843;
+  border-color: #fbcfe8;
+}
+
+[data-theme='sakura'] .tile-btn:hover:not(:disabled) {
+  border-color: #f472b6;
+  box-shadow: 0 4px 10px rgba(236, 72, 153, 0.15);
+  transform: translateY(-2px) scale(1.03);
+}
+
+[data-theme='sakura'] .tile-btn.is-placed {
+  background: #fdf2f8;
+  border-color: #fbcfe8;
+}
+
+/* L1-L5 Repetition Card on Home */
+.topic-card.l1l5-card {
+  border-left: 4px solid #6366f1;
+}
+
+[data-theme='sakura'] .topic-card.l1l5-card {
+  border-left: 4px solid #ec4899;
+}
+
+.topic-letter.special {
+  background: #e0e7ff;
+  color: #4338ca;
+}
+
+[data-theme='sakura'] .topic-letter.special {
+  background: #fce7f3;
+  color: #db2777;
+}
