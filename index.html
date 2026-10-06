@@ -9,6 +9,10 @@
       content="Träna japanska inför GEMA70: partiklar, grammatik och gamla tentor."
     />
     <title>TentaPlugg · Japanska</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" id="favicon-svg" />
+    <link rel="alternate icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
     <script>
       (function () {
         try {
@@ -17,6 +21,8 @@
             document.documentElement.dataset.theme = 'sakura';
             const m = document.querySelector('meta[name="theme-color"]');
             if (m) m.setAttribute('content', '#a82e66');
+            const f = document.getElementById('favicon-svg');
+            if (f) f.setAttribute('href', '/favicon-sakura.svg');
           } else {
             document.documentElement.dataset.theme = 'classic';
           }

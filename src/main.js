@@ -106,6 +106,10 @@ function applyTheme(t) {
     if (meta) {
       meta.setAttribute('content', effective === 'sakura' ? '#a82e66' : '#183f37');
     }
+    const favicon = document.getElementById('favicon-svg');
+    if (favicon) {
+      favicon.setAttribute('href', effective === 'sakura' ? '/favicon-sakura.svg' : '/favicon.svg');
+    }
     if (effective !== 'sakura') {
       purgeParticles();
     }
