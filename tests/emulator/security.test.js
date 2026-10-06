@@ -6,7 +6,15 @@ import {
   assertSucceeds,
   assertFails,
 } from '@firebase/rules-unit-testing';
-import { doc, setDoc, getDoc, updateDoc } from 'firebase/firestore';
+import {
+  doc,
+  setDoc,
+  getDoc,
+  updateDoc,
+  deleteDoc,
+  serverTimestamp,
+  Timestamp,
+} from 'firebase/firestore';
 let env;
 before(async () => {
   assert(process.env.FIRESTORE_EMULATOR_HOST, 'Only run against the local emulator');
@@ -17,6 +25,19 @@ before(async () => {
 });
 after(async () => {
   await env?.cleanup();
+});
+
+test('clock samples require server time and are private to their owner', async () => {
+  const owner = env.authenticatedContext('clock-owner').firestore();
+  const stranger = env.authenticatedContext('clock-stranger').firestore();
+  const ref = doc(owner, 'users/clock-owner/multiplayerClock/sample');
+  await assertFails(setDoc(ref, { time: Timestamp.fromMillis(1000) }));
+  await assertSucceeds(setDoc(ref, { time: serverTimestamp() }));
+  const otherRef = doc(stranger, 'users/clock-owner/multiplayerClock/sample');
+  await assertFails(getDoc(otherRef));
+  await assertFails(deleteDoc(otherRef));
+  await assertSucceeds(getDoc(ref));
+  await assertSucceeds(deleteDoc(ref));
 });
 test('owner can read/write, other users and guests cannot', async () => {
   const a = env.authenticatedContext('alice').firestore(),

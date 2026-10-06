@@ -1,6 +1,12 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    match /users/{userId}/multiplayerClock/{sampleId} {
+      allow read, delete: if request.auth != null && request.auth.uid == userId;
+      allow create: if request.auth != null && request.auth.uid == userId
+        && request.resource.data.keys().hasOnly(['time'])
+        && request.resource.data.time == request.time;
+    }
     match /users/{userId}/progress/{document} {
       allow read, delete: if request.auth != null && request.auth.uid == userId;
       allow create, update: if request.auth != null && request.auth.uid == userId
@@ -43,7 +49,6 @@ service cloud.firestore {
       let isHost = matchData.host.uid == userId;
       let isGuest = matchData.get('guest', null) != null && matchData.guest.uid == userId;
       let isPlayerInMap = matchData.get('players', null) != null && userId in matchData.players;
-      let isParticipant = isHost || isGuest || isPlayerInMap;
 
       let callerIsParticipant = request.auth.uid == userId ||
         (matchData.get('players', null) != null && request.auth.uid in matchData.players) ||
@@ -56,7 +61,7 @@ service cloud.firestore {
       let freshMatch = resource.data.get('lastMatchId', '') != matchId;
 
       return callerIsParticipant
-        && isParticipant
+        && (isHost || isGuest || isPlayerInMap)
         && isFinished
         && request.resource.data.elo == expectedElo
         && request.resource.data.matchesPlayed == resource.data.matchesPlayed + 1

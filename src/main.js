@@ -454,10 +454,24 @@ function render(focus = false) {
                 >${state.theme === 'sakura' ? 'Klassisk' : 'Kawaii-ify'}</span
               >
             </button>
-            <button class="account" id="account" ?disabled=${authBusy} @click=${account}>
-              ${icon(user ? 'LogOut' : 'LogIn')}<span
-                >${authBusy ? 'Vänta…' : user ? `Logga ut · ${user.displayName?.split(' ')[0] || 'konto'}` : 'Logga in med Google'}</span
-              >
+            <button
+              class="account ${user?.photoURL ? 'has-avatar' : ''}"
+              id="account"
+              ?disabled=${authBusy}
+              @click=${account}
+              title=${user ? `Inloggad som ${user.displayName || user.email || 'användare'} · Klicka för att logga ut` : 'Logga in med Google'}
+              aria-label=${user ? `Logga ut (${user.displayName || 'användare'})` : 'Logga in med Google'}
+            >
+              ${
+                user?.photoURL
+                  ? html`<img
+                      class="account-avatar"
+                      src=${user.photoURL}
+                      alt=""
+                      referrerpolicy="no-referrer"
+                    />`
+                  : icon(user ? 'LogOut' : 'LogIn')
+              }<span>${authBusy ? 'Vänta…' : user ? 'Logga ut' : 'Logga in med Google'}</span>
             </button>
           </div>
         </header>

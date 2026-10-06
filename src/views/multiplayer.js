@@ -14,6 +14,9 @@ import {
   subscribeToLeaderboard,
   getActivePlayerUids,
   getPlayerMatchOutcome,
+  getMultiplayerNow,
+  getRoundDeadline,
+  isRoundExpired,
   DEFAULT_ELO,
   ROUND_TIME_MS,
   TIMEOUT_PENALTY,
@@ -40,9 +43,6 @@ let activeUserUid = null;
 let unloadRegistered = false;
 let lobbyBusy = false;
 let viewEpoch = 0;
-function getSyncedNow() {
-  return Date.now();
-}
 
 export function resetMultiplayerView(uid = null) {
   const leaving = activeLobbyId && uid ? leaveLobby(activeLobbyId, uid) : Promise.resolve();
@@ -125,7 +125,7 @@ export function multiplayerView(ctx) {
     let advancing = false;
     timerInterval = setInterval(async () => {
       const game = currentLobbyData?.game;
-      const now = getSyncedNow();
+      const now = getMultiplayerNow();
       if (
         currentLobbyData?.status === 'waiting' &&
         currentLobbyData.host?.uid !== activeUserUid &&
@@ -139,17 +139,11 @@ export function multiplayerView(ctx) {
       if (!game || game.status === 'finished') return;
 
       const isHost = currentLobbyData.host?.uid === activeUserUid;
-      const roundExpired =
-        game.status === 'playing' &&
-        ((game.firstAnswerAt && now >= game.firstAnswerAt + ROUND_TIME_MS) ||
-          (game.roundStartTime && now >= game.roundStartTime + 60000));
+      const roundExpired = isRoundExpired(game, now);
       const pauseExpired = game.status === 'round_end' && now >= game.nextRoundAt;
       // Host triggers advance immediately; guests only act as a safety fallback (+3s delay)
       const due =
-        (roundExpired &&
-          (isHost ||
-            (game.firstAnswerAt && now >= game.firstAnswerAt + ROUND_TIME_MS + 3000) ||
-            now >= game.roundStartTime + 63000)) ||
+        (roundExpired && (isHost || now >= getRoundDeadline(game) + 3000)) ||
         (pauseExpired && (isHost || now >= game.nextRoundAt + 2000));
 
       if (activeLobbyId && due && !advancing) {
@@ -684,7 +678,7 @@ function arenaView(ctx) {
   const game = currentLobbyData.game;
   if (!game) return html`<div>Laddar match...</div>`;
 
-  const now = getSyncedNow();
+  const now = getMultiplayerNow();
   // Ready countdown ONLY applies to round 0 before the roundStartTime
   const isCountdown =
     game.currentRoundIndex === 0 && Boolean(game.roundStartTime) && now < game.roundStartTime;
@@ -813,7 +807,7 @@ function arenaView(ctx) {
                     <button
                       type="button"
                       class="choice-btn ${btnState}"
-                      ?disabled=${hasAnswered || hasForfeited || game.status !== 'playing'}
+                      ?disabled=${hasAnswered || hasForfeited || game.status !== 'playing' || isRoundExpired(game, now)}
                       @click=${async () => {
                         if (hasAnswered || hasForfeited || game.status !== 'playing') return;
                         const isCorrect = choice === currentQ.correctAnswer;

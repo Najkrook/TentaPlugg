@@ -40,6 +40,8 @@ Gäster sparar lokalt. Konton har separata lokala data och privata Firestore-dok
 
 Reglerna i `firestore.rules` tillåter endast ägaren att läsa/skriva sin data. Webbens Firebase-konfiguration innehåller endast publika projektidentifierare. Inga administrativa nycklar ingår i appen. Google-inloggning fungerar på de två Firebase-domänerna; localhost är avsiktligt inte auktoriserad.
 
+Multiplayer synkroniserar klockan mot Firestore när en lobby skapas eller ansluts. Tre privata, tillfälliga tidsprover under `users/{uid}/multiplayerClock/{sampleId}` tas och raderas; det snabbaste provet används tillsammans med `performance.now()` så att enhetens väggklocka inte påverkar matchen. Rundor har 60 sekunders väntetid utan svar, därefter ett separat åttasekundersfönster från första svaret. Publicera de uppdaterade Firestore-reglerna före eller tillsammans med klienten, eftersom klocksynkroniseringen behöver den nya regeln.
+
 ```powershell
 npm run build
 npx firebase deploy --only hosting,firestore:rules --project tentaplugg-japanska-2026

@@ -57,6 +57,65 @@ async function join(page, code) {
   await expect(page.locator('.room-code-tag')).toHaveText(code);
 }
 
+test('skewed device clocks preserve countdown, answer window and automatic round progression', async ({
+  page,
+  browser,
+}, testInfo) => {
+  const guest = await browser.newPage();
+  const errors = [];
+  for (const client of [page, guest]) client.on('pageerror', (error) => errors.push(error.message));
+  try {
+    const hostUid = await login(page);
+    const guestUid = await login(guest);
+    await page.clock.setFixedTime(Date.now() + 60000);
+    await guest.clock.setFixedTime(Date.now() - 60000);
+    const code = await create(page);
+    await join(guest, code);
+    await page.getByRole('button', { name: 'Starta matchen!' }).click();
+    await expect(page.locator('.arena-countdown-overlay')).toBeVisible();
+    await expect(guest.locator('.arena-countdown-overlay')).toBeVisible();
+    await expect(guest.locator('.choices-grid button').first()).toBeEnabled();
+    let lobby = await read(page, 'lobbies', code);
+    await guest
+      .getByRole('button', { name: lobby.game.questions[0].correctAnswer, exact: true })
+      .click();
+    await expect(page.locator('.answered-badge')).toContainText('1/2 svarat');
+    await page
+      .getByRole('button', { name: lobby.game.questions[0].correctAnswer, exact: true })
+      .click();
+    await expect(page.locator('.round-end-banner')).toBeVisible();
+    lobby = await read(page, 'lobbies', code);
+    expect(lobby.game.answers[0][hostUid].isCorrect).toBe(true);
+    expect(lobby.game.answers[0][guestUid].isCorrect).toBe(true);
+    await expect(page.locator('.round-badge')).toHaveText('Fråga 2 / 10');
+    await page.evaluate(async (code) => {
+      const { db } = await import('/src/cloud.js');
+      const { getMultiplayerNow } = await import('/src/multiplayer.js');
+      const { doc, updateDoc } = window.multiplayerTestFirestore;
+      await updateDoc(doc(db, 'lobbies', code), {
+        'game.roundStartTime': getMultiplayerNow() - 59000,
+      });
+    }, code);
+    lobby = await read(page, 'lobbies', code);
+    await page
+      .getByRole('button', { name: lobby.game.questions[1].correctAnswer, exact: true })
+      .click();
+    // Wait for the displayed timer to prove the old 60s cutoff has passed.
+    await expect(guest.locator('.timer-countdown-badge')).toContainText('5s kvar');
+    await expect(guest.locator('.choices-grid button').first()).toBeEnabled();
+    await page.screenshot({ path: testInfo.outputPath('synchronized-arena.png') });
+    await expect(guest.locator('.round-end-banner')).toContainText('Tiden ute!', {
+      timeout: 10000,
+    });
+    lobby = await read(page, 'lobbies', code);
+    expect(lobby.game.answers[1][guestUid]).toMatchObject({ timedOut: true, pointsAwarded: -50 });
+    await expect(page.locator('.round-badge')).toHaveText('Fråga 3 / 10');
+    expect(errors).toEqual([]);
+  } finally {
+    await guest.close();
+  }
+});
+
 test('two new players can complete ten rounds and record both ratings exactly once', async ({
   page,
   browser,
@@ -137,7 +196,7 @@ test('a three-player tie shows a loss to third place', async ({ page, browser },
         const { doc, updateDoc } = window.multiplayerTestFirestore;
         await updateDoc(doc(db, 'lobbies', code), {
           'game.currentRoundIndex': 9,
-          'game.roundStartTime': Date.now() - 9000,
+          'game.roundStartTime': Date.now() - 61000,
           'game.scores': { [ids[0]]: 1000, [ids[1]]: 1000, [ids[2]]: 0 },
         });
       },
@@ -190,17 +249,17 @@ test('remaining players finish a round after the host leaves', async ({ page, br
       .getByRole('button', { name: 'Plugga', exact: true })
       .filter({ visible: true })
       .click();
-    await expect(second.locator('.answered-badge')).toContainText('0/2 har svarat');
+    await expect(second.locator('.answered-badge')).toContainText('0/2 svarat');
     const answer = (await read(second, 'lobbies', code)).game.questions[0].correctAnswer;
     await second
       .locator('.choices-grid')
       .getByRole('button', { name: answer, exact: true })
       .click();
-    await expect(third.locator('.answered-badge')).toContainText('1/2 har svarat');
+    await expect(third.locator('.answered-badge')).toContainText('1/2 svarat');
     await third.locator('.choices-grid').getByRole('button', { name: answer, exact: true }).click();
     await expect(third.locator('.round-end-banner')).toBeVisible();
     await expect(second.locator('.round-badge')).toHaveText('Fråga 2 / 10');
-    await expect(second.locator('.answered-badge')).toContainText('0/2 har svarat');
+    await expect(second.locator('.answered-badge')).toContainText('0/2 svarat');
   } finally {
     await second.close();
     await third.close();
@@ -227,7 +286,7 @@ test('final round timeout records a draw for both players, including legacy prof
           const ref = doc(db, 'lobbies', code);
           const snap = await tx.get(ref);
           tx.update(ref, {
-            game: { ...snap.data().game, currentRoundIndex: 9, roundStartTime: Date.now() - 9000 },
+            game: { ...snap.data().game, currentRoundIndex: 9, roundStartTime: Date.now() - 61000 },
           });
           tx.update(doc(db, 'leaderboard', hostUid), { lastMatchId: deleteField() });
         });

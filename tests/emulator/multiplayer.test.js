@@ -80,11 +80,47 @@ test('ten players finish the last round with every answer and rating saved exact
   assert.equal((await m.profile(9)).matchesPlayed, 1);
 });
 
+test('answer API rejects submissions during the initial countdown', async () => {
+  const m = await match(2);
+  await m.update({ 'game.roundStartTime': Date.now() + 3000 });
+  const answer = (await m.read()).game.questions[0].correctAnswer;
+  await m.as(1, () => mp.submitPlayerAnswer(m.code, m.users[1].uid, 0, answer));
+  assert.equal((await m.answerDocument(1, 0)).exists(), false);
+  assert.equal((await m.read()).game.scores[m.users[1].uid], 0);
+});
+
+test('first answer near the idle limit still gives opponents eight seconds', async () => {
+  const m = await match(2);
+  const now = Date.now();
+  await m.update({ 'game.roundStartTime': now - 60000, 'game.firstAnswerAt': now - 1000 });
+  await m.as(0, () => mp.advanceRoundIfDue(m.code));
+  assert.equal((await m.read()).game.status, 'playing');
+  const answer = (await m.read()).game.questions[0].correctAnswer;
+  await m.as(1, () => mp.submitPlayerAnswer(m.code, m.users[1].uid, 0, answer));
+  assert.equal((await m.read()).game.answers[0][m.users[1].uid].isCorrect, true);
+});
+
+test('different wall clocks do not reject timely answers or prematurely expire rounds', async (t) => {
+  const m = await match(3);
+  await m.update({ 'game.roundStartTime': Date.now() - 1000 });
+  const answer = (await m.read()).game.questions[0].correctAnswer;
+  const realNow = Date.now.bind(Date);
+  t.mock.method(Date, 'now', () => realNow() - 10000);
+  await m.as(1, () => mp.submitPlayerAnswer(m.code, m.users[1].uid, 0, answer));
+  Date.now.mock.restore();
+  await m.as(0, () => mp.advanceRoundIfDue(m.code));
+  assert.equal((await m.read()).game.status, 'playing');
+  t.mock.method(Date, 'now', () => realNow() + 10000);
+  await m.as(2, () => mp.submitPlayerAnswer(m.code, m.users[2].uid, 0, answer));
+  Date.now.mock.restore();
+  assert.equal((await m.answerDocument(2, 0)).exists(), true);
+});
+
 test('a shared first place records a loss for lower scoring players', async () => {
   const m = await match(3);
   await m.update({
     'game.currentRoundIndex': 9,
-    'game.roundStartTime': Date.now() - 9000,
+    'game.roundStartTime': Date.now() - 61000,
     'game.scores': { [m.users[0].uid]: 1000, [m.users[1].uid]: 1000, [m.users[2].uid]: 0 },
   });
   await m.as(0, () => mp.advanceRoundIfDue(m.code));
@@ -121,7 +157,7 @@ test('host leaving keeps the arena running, excludes their answers, and records 
     mp.submitPlayerAnswer(m.code, m.users[0].uid, 1, game.questions[1].correctAnswer),
   );
   assert.equal((await m.answerDocument(0, 1)).exists(), false);
-  await m.update({ 'game.currentRoundIndex': 9, 'game.roundStartTime': Date.now() - 9000 });
+  await m.update({ 'game.currentRoundIndex': 9, 'game.roundStartTime': Date.now() - 61000 });
   await m.as(1, () => mp.advanceRoundIfDue(m.code));
   assert.equal((await m.read()).status, 'finished');
   assert.equal((await m.profile(0)).losses, 1);

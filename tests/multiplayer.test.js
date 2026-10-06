@@ -19,7 +19,31 @@ import {
   TIMEOUT_PENALTY,
   applyTimeoutPenalties,
   closeRound,
+  getRoundDeadline,
+  isRoundExpired,
 } from '../src/multiplayer.js';
+
+test('round deadline switches from the idle limit to a full first-answer window', () => {
+  const game = {
+    status: 'playing',
+    currentRoundIndex: 0,
+    roundStartTime: 1000,
+    playerUids: ['a', 'b'],
+    scores: { a: 0, b: 0 },
+    answers: {},
+    questions: [{ correctAnswer: 'A' }, { correctAnswer: 'B' }],
+  };
+  assert.equal(getRoundDeadline(game), 61000);
+  assert.equal(evaluateRound(game, 'a', 'A', 61000), game);
+  assert.equal(evaluateRound(game, 'a', 'A', 999), game);
+  const answered = evaluateRound(game, 'a', 'A', 60000);
+  assert.equal(getRoundDeadline(answered), 68000);
+  assert.equal(isRoundExpired(answered, 61000), false);
+  assert.equal(isRoundExpired(answered, 67999), false);
+  assert.notEqual(evaluateRound(answered, 'b', 'A', 67999), answered);
+  assert.equal(isRoundExpired(answered, 68000), true);
+  assert.equal(evaluateRound(answered, 'b', 'A', 68000), answered);
+});
 
 test('ELO rating calculations match FIDE formulas', () => {
   // Equal rating players (1200 vs 1200)
@@ -515,4 +539,3 @@ test('Round advancement lifecycle: advances to round_end after 8s and then to qu
   assert.equal(round2.firstAnswerAt, null, 'firstAnswerAt reset for new round');
   assert.equal(round2.roundStartTime, 12000);
 });
-

@@ -10,6 +10,7 @@ import {
   runTransaction,
 } from 'firebase/firestore';
 import { db } from './cloud.js';
+import { multiplayerNow, synchronizeMultiplayerClock } from './multiplayer-clock.js';
 import { questions } from './data.js';
 import { extraQuestions } from './extra-content.js';
 import { vocabularyList, kanjiList } from './vocabulary-data.js';
@@ -24,6 +25,21 @@ export const QUESTIONS_PER_MATCH = 10;
 export const MAX_PLAYERS = 10;
 export const MIN_PLAYERS = 2;
 export const HEARTBEAT_TTL_MS = 45000; // 45s heartbeat timeout for lobbies
+export const IDLE_ROUND_TIME_MS = 60000;
+
+export function getMultiplayerNow() {
+  return multiplayerNow(db);
+}
+
+export function getRoundDeadline(game) {
+  if (game.firstAnswerAt != null) return game.firstAnswerAt + ROUND_TIME_MS;
+  return game.roundStartTime != null ? game.roundStartTime + IDLE_ROUND_TIME_MS : null;
+}
+
+export function isRoundExpired(game, now = getMultiplayerNow()) {
+  const deadline = getRoundDeadline(game);
+  return game.status === 'playing' && deadline != null && now >= deadline;
+}
 
 /**
  * Calculates ELO change based on standard FIDE Elo rating formula for 1v1.
@@ -482,7 +498,13 @@ export function closeRound(game, now, playersMap = null) {
  *
  * Adaptively ends round when all active players have answered.
  */
-export function evaluateRound(game, uid, selectedAnswer, now = Date.now(), playersMap = null) {
+export function evaluateRound(
+  game,
+  uid,
+  selectedAnswer,
+  now = getMultiplayerNow(),
+  playersMap = null,
+) {
   if (!game || game.status !== 'playing') return game;
   const playerUids = getActivePlayerUids(game);
   if (!playerUids.includes(uid)) return game;
@@ -496,8 +518,8 @@ export function evaluateRound(game, uid, selectedAnswer, now = Date.now(), playe
     return game;
   }
 
-  // 2. Guard against submissions after round time has expired (> ROUND_TIME_MS after first answer)
-  if (game.firstAnswerAt && now - game.firstAnswerAt > ROUND_TIME_MS) {
+  // 2. Submission and advancement must agree on the exact deadline, including idle rounds.
+  if (isRoundExpired(game, now)) {
     return game;
   }
 
@@ -507,7 +529,7 @@ export function evaluateRound(game, uid, selectedAnswer, now = Date.now(), playe
     return game;
   }
 
-  const isFirstAnswer = !game.firstAnswerAt;
+  const isFirstAnswer = game.firstAnswerAt == null;
   const firstAnswerAt = isFirstAnswer ? now : game.firstAnswerAt;
   const isCorrect = isAnswerCorrect(currentQ, selectedAnswer);
 
@@ -555,7 +577,7 @@ export function evaluateRound(game, uid, selectedAnswer, now = Date.now(), playe
 /**
  * Advances game from 'round_end' to next round.
  */
-export function advanceToNextRound(game, now = Date.now()) {
+export function advanceToNextRound(game, now = getMultiplayerNow()) {
   if (!game || game.status !== 'round_end') return game;
   const nextIdx = (game.currentRoundIndex || 0) + 1;
   if (nextIdx >= game.questions.length) {
@@ -577,7 +599,7 @@ export function advanceToNextRound(game, now = Date.now()) {
 /**
  * Finalizes match, calculates winner, leaderboards and All-play-all ELO ratings for 2–10 players.
  */
-export function finalizeMatch(game, now = Date.now(), playersMap = null) {
+export function finalizeMatch(game, now = getMultiplayerNow(), playersMap = null) {
   const playersSource = playersMap || game.players || {};
   let uids = Object.keys(game.scores || {});
   if (uids.length === 0) {
@@ -664,13 +686,14 @@ async function ensureLeaderboardProfile(user) {
  */
 export async function createLobby(user, category) {
   if (!user || !user.uid) throw new Error('Inloggning krävs');
+  await synchronizeMultiplayerClock(db, user.uid);
   const code = generateLobbyCode();
   const lobbyRef = doc(db, 'lobbies', code);
 
   const profile = await ensureLeaderboardProfile(user);
   const hostElo = profile.elo;
 
-  const now = Date.now();
+  const now = getMultiplayerNow();
   const lobbyData = {
     id: code,
     category,
@@ -713,7 +736,7 @@ export async function sendHeartbeat(lobbyId, uid) {
     await runTransaction(db, async (tx) => {
       const snap = await tx.get(lobbyRef);
       if (snap.exists() && snap.data().status === 'waiting' && snap.data().host?.uid === uid) {
-        tx.update(lobbyRef, { heartbeat: Date.now(), updatedAt: Date.now() });
+        tx.update(lobbyRef, { heartbeat: getMultiplayerNow(), updatedAt: getMultiplayerNow() });
       }
     });
   } catch {}
@@ -724,6 +747,7 @@ export async function sendHeartbeat(lobbyId, uid) {
  */
 export async function joinLobby(lobbyId, user) {
   if (!user || !user.uid) throw new Error('Inloggning krävs');
+  await synchronizeMultiplayerClock(db, user.uid);
   const cleanId = lobbyId.toUpperCase().trim();
   const lobbyRef = doc(db, 'lobbies', cleanId);
 
@@ -735,7 +759,7 @@ export async function joinLobby(lobbyId, user) {
     if (!snap.exists()) throw new Error('Lobbyn hittades inte');
     const data = snap.data();
     if (data.status !== 'waiting') throw new Error('Matchen har redan startat');
-    if (Date.now() - (data.heartbeat || data.createdAt || 0) >= HEARTBEAT_TTL_MS)
+    if (getMultiplayerNow() - (data.heartbeat || data.createdAt || 0) >= HEARTBEAT_TTL_MS)
       throw new Error('Lobbyn är inte längre aktiv');
 
     const currentPlayers = data.players || {
@@ -744,7 +768,7 @@ export async function joinLobby(lobbyId, user) {
         displayName: data.host.displayName,
         photoURL: data.host.photoURL || null,
         elo: data.host.elo || DEFAULT_ELO,
-        joinedAt: data.createdAt || Date.now(),
+        joinedAt: data.createdAt || getMultiplayerNow(),
         score: 0,
       },
     };
@@ -756,7 +780,7 @@ export async function joinLobby(lobbyId, user) {
       throw new Error('Lobbyn är redan full (max 10 spelare)');
     }
 
-    const now = Date.now();
+    const now = getMultiplayerNow();
     const guestData = {
       uid: user.uid,
       displayName: user.displayName || `Spelare ${count + 1}`,
@@ -809,7 +833,7 @@ export async function leaveLobby(lobbyId, uid) {
 
       // If in progress or finished, forfeiting or exiting
       if (data.game && data.game.status !== 'finished' && data.status !== 'waiting') {
-        await applyForfeitInTransaction(tx, lobbyRef, data, uid, Date.now());
+        await applyForfeitInTransaction(tx, lobbyRef, data, uid, getMultiplayerNow());
         return;
       }
 
@@ -833,7 +857,7 @@ export async function leaveLobby(lobbyId, uid) {
           players: updatedPlayers,
           playerCount: newCount,
           guest: newGuest,
-          updatedAt: Date.now(),
+          updatedAt: getMultiplayerNow(),
         });
       }
     });
@@ -855,9 +879,9 @@ export async function startMatch(lobbyId) {
     if (data.status !== 'waiting') return data.game;
 
     const playersMap = data.players || {
-      [data.host.uid]: { ...data.host, joinedAt: Date.now(), score: 0 },
+      [data.host.uid]: { ...data.host, joinedAt: getMultiplayerNow(), score: 0 },
       ...(data.guest
-        ? { [data.guest.uid]: { ...data.guest, joinedAt: Date.now(), score: 0 } }
+        ? { [data.guest.uid]: { ...data.guest, joinedAt: getMultiplayerNow(), score: 0 } }
         : {}),
     };
 
@@ -867,7 +891,7 @@ export async function startMatch(lobbyId) {
     }
 
     const questionsList = generateQuestionsForCategory(data.category, QUESTIONS_PER_MATCH);
-    const now = Date.now();
+    const now = getMultiplayerNow();
 
     const initialScores = {};
     for (const pUid of Object.keys(playersMap)) {
@@ -921,7 +945,7 @@ export async function submitPlayerAnswer(lobbyId, uid, roundIndex, selectedAnswe
     if (!data.game) return null;
 
     const game = data.game;
-    const now = Math.max(game.roundStartTime || 0, Date.now());
+    const now = getMultiplayerNow();
 
     if (game.currentRoundIndex !== roundIndex) return null;
     const updatedGame = evaluateRound(game, uid, selectedAnswer, now, data.players);
@@ -964,7 +988,7 @@ export async function advanceRoundIfDue(lobbyId) {
     const data = snap.data();
     if (!data.game) return;
 
-    const now = Date.now();
+    const now = getMultiplayerNow();
     const game = data.game;
 
     if (game.status === 'round_end' && game.nextRoundAt && now >= game.nextRoundAt) {
@@ -974,11 +998,7 @@ export async function advanceRoundIfDue(lobbyId) {
         status: nextGame.status,
         updatedAt: now,
       });
-    } else if (
-      game.status === 'playing' &&
-      ((game.firstAnswerAt && now - game.firstAnswerAt >= ROUND_TIME_MS) ||
-        (game.roundStartTime && now - game.roundStartTime >= 60000))
-    ) {
+    } else if (isRoundExpired(game, now)) {
       const playersMap = data.players || {};
       const updated = closeRound(game, now, playersMap);
       if (updated.status === 'finished') {
@@ -1131,7 +1151,7 @@ export function subscribeToOpenLobbies(callback, onError) {
   const q = query(collection(db, 'lobbies'), where('status', '==', 'waiting'));
   let waiting = [];
   const publish = () => {
-    const now = Date.now();
+    const now = getMultiplayerNow();
     callback(
       waiting
         .filter((data) => {
