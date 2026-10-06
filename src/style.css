@@ -104,12 +104,113 @@
 .particle-final-token {
   border-bottom: 2px solid var(--green);
 }
+.particle-comparison-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 16px;
+  margin: 16px 0;
+}
+.particle-comparison-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.particle-comparison-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.particle-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+.particle-indicator.right {
+  background: #e7f4e8;
+  color: #20552d;
+  border: 1px solid #337744;
+}
+.particle-indicator.wrong {
+  background: #fff0ee;
+  color: #8c2929;
+  border: 1px solid #ae4646;
+}
+.particle-comparison-sentence {
+  margin: 2px 0 0;
+  font-size: 21px;
+  line-height: 1.8;
+  gap: 4px 6px;
+}
+.particle-result-badge {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 38px;
+  min-height: 42px;
+  padding: 2px 6px;
+  border-radius: 7px;
+  font-weight: 600;
+  font-size: 21px;
+  vertical-align: middle;
+}
+.particle-result-badge.right {
+  color: #20552d;
+  background: #e7f4e8;
+  border: 1.5px solid #337744;
+}
+.particle-result-badge.wrong {
+  color: #8c2929;
+  background: #fff0ee;
+  border: 1.5px solid #ae4646;
+}
+.particle-result-badge .particle-symbol {
+  position: absolute;
+  right: -6px;
+  top: -10px;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 50%;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  border: 1px solid currentColor;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
 .particle-context {
   font-size: 15px;
 }
 @media (max-width: 600px) {
   .particle-sentence {
     font-size: 22px;
+  }
+  .particle-comparison-sentence {
+    font-size: 18px;
+    gap: 3px 4px;
+  }
+  .particle-result-badge {
+    min-width: 32px;
+    min-height: 36px;
+    font-size: 18px;
+    padding: 1px 4px;
   }
   .particle-panel .question-actions {
     flex-wrap: wrap;
@@ -6134,4 +6235,13 @@ html:not([data-theme='sakura']) .sound-slider,
   display: flex;
   justify-content: flex-end;
   margin-top: 4px;
+}
+
+[data-theme='sakura'] .particle-comparison-card {
+  background: rgba(255, 245, 248, 0.75);
+  border-color: #ffd6e7;
+}
+
+[data-theme='sakura'] .particle-comparison-label {
+  color: #8a6270;
 }

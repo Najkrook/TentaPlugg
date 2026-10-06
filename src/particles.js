@@ -17,6 +17,22 @@ const definitions = [
       'べんきょうしました',
       '。',
     ],
+    targetParts: [
+      'きのう',
+      'としょかん',
+      p('で'),
+      'にほんご',
+      p('を'),
+      'べんきょうしました',
+      '。',
+      'うち',
+      p('で'),
+      p('も'),
+      'にほんご',
+      p('を'),
+      'べんきょうしました',
+      '。',
+    ],
     answers: [
       'きのうとしょかんでにほんごをべんきょうしました。うちでもにほんごをべんきょうしました。',
     ],
@@ -39,16 +55,33 @@ const definitions = [
       'あいました',
       '。',
     ],
+    targetParts: [
+      'こうこう',
+      p('の'),
+      'とき',
+      '、',
+      'よく',
+      'バスてい',
+      p('の'),
+      'ちかく',
+      p('で'),
+      'たけしさん',
+      p('に'),
+      'あいました',
+      '。',
+    ],
     answers: ['こうこうのとき、よくバスていのちかくでたけしさんにあいました。'],
   },
   {
     parts: ['おてら', p('で'), 'しゃしん', 'たくさん', p('を'), 'とりました', '。'],
+    targetParts: ['おてら', p('で'), 'しゃしん', p('を'), 'たくさん', 'とりました', '。'],
     answers: ['おてらでしゃしんをたくさんとりました。'],
     explanation:
       'を markerar objektet しゃしん och placeras här direkt efter det: しゃしんをたくさんとりました。で markerar platsen där bilderna togs.',
   },
   {
     parts: ['まいにち', '７じはん', p('で'), 'ねます', '。'],
+    targetParts: ['まいにち', '７じはん', p('に'), 'ねます', '。'],
     answers: ['まいにち７じはんにねます。'],
     context: 'Avsikten är: Jag lägger mig halv åtta varje dag.',
     explanation:
@@ -57,6 +90,17 @@ const definitions = [
   },
   {
     parts: ['よく', 'スーパー', p('で'), 'にく', p('と'), 'やさい', p('を'), 'かいます', '。'],
+    targetParts: [
+      'よく',
+      'スーパー',
+      p('で'),
+      'にく',
+      p('と'),
+      'やさい',
+      p('を'),
+      'かいます',
+      '。',
+    ],
     answers: ['よくスーパーでにくとやさいをかいます。'],
   },
   {
@@ -73,6 +117,23 @@ const definitions = [
       'カフェ',
       p('で'),
       p('も'),
+      'コーヒー',
+      p('を'),
+      'のみました',
+      '。',
+    ],
+    targetParts: [
+      'きょう',
+      'カフェ',
+      p('で'),
+      'コーヒー',
+      p('を'),
+      'のみました',
+      '。',
+      'きのう',
+      p('も'),
+      'カフェ',
+      p('で'),
       'コーヒー',
       p('を'),
       'のみました',
@@ -96,7 +157,13 @@ export function particleDefinition(id) {
     text: typeof part === 'string' ? part : part.text,
     particle: typeof part !== 'string',
   }));
-  return { ...definition, tokens, sentence: tokens.map((t) => t.text).join('') };
+  const targetParts = definition.targetParts || definition.parts;
+  const targetTokens = targetParts.map((part, i) => ({
+    id: `target-${i}`,
+    text: typeof part === 'string' ? part : part.text,
+    particle: typeof part !== 'string',
+  }));
+  return { ...definition, tokens, targetTokens, sentence: tokens.map((t) => t.text).join('') };
 }
 
 // Old sessions deliberately retain the original question and self-assessment behavior.
@@ -217,4 +284,80 @@ export function reduceParticle(q, current, action) {
     state.editor = null;
   } else return current;
   return state;
+}
+
+export function lcsIndices(uList, tList) {
+  const m = uList.length;
+  const n = tList.length;
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 0; i < m; i++) {
+    for (let j = 0; j < n; j++) {
+      if (uList[i] === tList[j]) {
+        dp[i + 1][j + 1] = dp[i][j] + 1;
+      } else {
+        dp[i + 1][j + 1] = Math.max(dp[i + 1][j], dp[i][j + 1]);
+      }
+    }
+  }
+  const matchedU = new Set();
+  let i = m;
+  let j = n;
+  while (i > 0 && j > 0) {
+    if (uList[i - 1] === tList[j - 1] && dp[i][j] === dp[i - 1][j - 1] + 1) {
+      matchedU.add(i - 1);
+      i--;
+      j--;
+    } else if (dp[i - 1][j] >= dp[i][j - 1]) {
+      i--;
+    } else {
+      j--;
+    }
+  }
+  return matchedU;
+}
+
+export function evaluateUserTokens(userTokens, targetTokens = []) {
+  if (!userTokens) return [];
+  if (!targetTokens || targetTokens.length === 0) {
+    return userTokens.map((t) => (t.particle ? { ...t, status: 'wrong' } : t));
+  }
+
+  const result = [];
+  let uIdx = 0;
+  let tIdx = 0;
+
+  while (uIdx < userTokens.length || tIdx < targetTokens.length) {
+    const uParticles = [];
+    while (uIdx < userTokens.length && userTokens[uIdx].particle) {
+      uParticles.push(userTokens[uIdx]);
+      uIdx++;
+    }
+    const tParticles = [];
+    while (tIdx < targetTokens.length && targetTokens[tIdx].particle) {
+      tParticles.push(targetTokens[tIdx]);
+      tIdx++;
+    }
+
+    const matchedU = lcsIndices(
+      uParticles.map((p) => p.text),
+      tParticles.map((p) => p.text),
+    );
+
+    for (let i = 0; i < uParticles.length; i++) {
+      result.push({
+        ...uParticles[i],
+        status: matchedU.has(i) ? 'right' : 'wrong',
+      });
+    }
+
+    if (uIdx < userTokens.length) {
+      result.push(userTokens[uIdx]);
+      uIdx++;
+    }
+    if (tIdx < targetTokens.length) {
+      tIdx++;
+    }
+  }
+
+  return result;
 }

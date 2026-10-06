@@ -10,6 +10,8 @@ import {
   markingResult,
   reduceParticle,
   particleSentence,
+  evaluateUserTokens,
+  lcsIndices,
 } from '../src/particles.js';
 
 const session = () => createSession(['l5-review-3'], 'Partiklar');
@@ -195,4 +197,57 @@ test('moving forward preserves token identity and fixed words cannot be edited',
   const choice = reduceParticle(q, adding, { type: 'position', index: 2 });
   assert.strictEqual(reduceParticle(q, choice, { type: 'choice', text: 'ねこ' }), choice);
   assert.equal(particleSentence(initial), q.exercise.sentence);
+});
+
+test('all six exercises have valid targetTokens strictly matching answers[0]', () => {
+  for (let n = 1; n <= 6; n++) {
+    const q = question(n);
+    assert.ok(Array.isArray(q.exercise.targetTokens), `targetTokens exists for question ${n}`);
+    const text = q.exercise.targetTokens.map((t) => t.text).join('');
+    assert.equal(text, q.answers[0], `targetTokens text matches answer for question ${n}`);
+    const particles = q.exercise.targetTokens.filter((t) => t.particle);
+    assert.ok(particles.length > 0, `has particles for question ${n}`);
+  }
+});
+
+test('evaluateUserTokens accurately marks correct, incorrect, misplaced, and extra particles', () => {
+  // Question 2: user replaces に with が
+  const q2 = question(2);
+  const stateQ2 = run(q2, editState(q2), [
+    { type: 'select', id: 'original-10' },
+    { type: 'replace', id: 'original-10' },
+    { type: 'choice', text: 'が' },
+  ]);
+  const evalQ2 = evaluateUserTokens(stateQ2.tokens, q2.exercise.targetTokens);
+  const evaluatedParticlesQ2 = evalQ2.filter((t) => t.particle);
+  assert.equal(evaluatedParticlesQ2.length, 4);
+  assert.equal(evaluatedParticlesQ2[0].text, 'の');
+  assert.equal(evaluatedParticlesQ2[0].status, 'right');
+  assert.equal(evaluatedParticlesQ2[1].text, 'の');
+  assert.equal(evaluatedParticlesQ2[1].status, 'right');
+  assert.equal(evaluatedParticlesQ2[2].text, 'で');
+  assert.equal(evaluatedParticlesQ2[2].status, 'right');
+  assert.equal(evaluatedParticlesQ2[3].text, 'が');
+  assert.equal(evaluatedParticlesQ2[3].status, 'wrong');
+
+  // Question 3: initial sentence has を after たくさん (misplaced)
+  const q3 = question(3);
+  const evalQ3 = evaluateUserTokens(q3.exercise.tokens, q3.exercise.targetTokens);
+  const pQ3 = evalQ3.filter((t) => t.particle);
+  assert.equal(pQ3.length, 2);
+  assert.equal(pQ3[0].text, 'で');
+  assert.equal(pQ3[0].status, 'right');
+  assert.equal(pQ3[1].text, 'を');
+  assert.equal(pQ3[1].status, 'wrong');
+
+  // Question 6: initial sentence has extra も after で
+  const q6 = question(6);
+  const evalQ6 = evaluateUserTokens(q6.exercise.tokens, q6.exercise.targetTokens);
+  const pQ6 = evalQ6.filter((t) => t.particle);
+  assert.equal(pQ6.find((p, idx) => idx === 4)?.text, 'も');
+  assert.equal(pQ6.find((p, idx) => idx === 4)?.status, 'wrong');
+
+  // Completely correct answer marks all particles as right
+  const correctEval = evaluateUserTokens(q2.exercise.targetTokens, q2.exercise.targetTokens);
+  assert.ok(correctEval.filter((t) => t.particle).every((t) => t.status === 'right'));
 });

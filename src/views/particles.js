@@ -5,6 +5,7 @@ import {
   isPunctuation,
   particleCharacters,
   particleChoices,
+  evaluateUserTokens,
 } from '../particles.js';
 import { icon, languageText, speechButton, heading } from './shared.js';
 
@@ -18,6 +19,8 @@ export function particleSessionView(ctx, q, ratings) {
   const placing = editor?.mode.endsWith('-position');
   const choosing = editor?.mode.endsWith('-choice');
   const selectedToken = state.tokens.find((t) => t.id === editor?.id);
+  const targetTokens = q.exercise?.targetTokens || q.exercise?.tokens || [];
+  const evaluatedUserTokens = evaluateUserTokens(state.tokens, targetTokens);
   return html`
     <div class="session-top">
       <button class="text-button" @click=${ctx.exit}>${icon('ArrowLeft')} Spara & lämna</button>
@@ -40,12 +43,20 @@ export function particleSessionView(ctx, q, ratings) {
           <li aria-current=${!marking ? 'step' : 'false'}>2. Rätta meningen</li>
         </ol>
         <h1 class="question-title" tabindex="-1">
-          ${marking ? 'Markera de tecken som du tror är partiklar' : 'Ändra partiklarna om det behövs'}
+          ${marking ? 'Markera de tecken som du tror är partiklar' : done ? 'Resultat & rättning' : 'Ändra partiklarna om det behövs'}
         </h1>
         ${q.exercise.context ? html`<p class="particle-context">${q.exercise.context}</p>` : ''}
-        <p class="muted">
-          ${marking ? 'Tryck på ett tecken för att markera eller avmarkera det. Rätta när du är klar.' : 'Låt meningen vara om den redan är korrekt. Tryck på en partikel för att ändra den.'}
-        </p>
+        ${
+          !done
+            ? html`<p class="muted">
+                ${
+                  marking
+                    ? 'Tryck på ett tecken för att markera eller avmarkera det. Rätta när du är klar.'
+                    : 'Låt meningen vara om den redan är korrekt. Tryck på en partikel för att ändra den.'
+                }
+              </p>`
+            : ''
+        }
         ${
           marking
             ? html`
@@ -106,117 +117,176 @@ export function particleSessionView(ctx, q, ratings) {
                     : ''
                 }
               `
-            : html`
-                <div
-                  class="particle-sentence particle-editing"
-                  lang="ja"
-                  role="group"
-                  aria-label="Redigera partiklar i meningen"
-                >
-                  ${state.tokens.map(
-                    (token, index) => html`
-                      ${placing ? html`<button type="button" class="particle-position" aria-label="Placera före ${token.text}, position ${index + 1}" @click=${() => act('position', { index })}>＋</button>` : ''}
-                      ${
-                        token.particle && !done
-                          ? html`<button
-                              type="button"
-                              class="particle-token ${editor?.id === token.id ? 'selected' : ''}"
-                              data-token-id=${token.id}
-                              aria-label="Ändra ${token.text}, del ${index + 1}"
-                              aria-pressed=${editor?.id === token.id}
-                              @click=${() => act('select', { id: token.id })}
-                            >
-                              ${token.text}
-                            </button>`
-                          : html`<span class=${token.particle ? 'particle-final-token' : ''}
-                              >${token.text}</span
-                            >`
-                      }
-                    `,
-                  )}
-                </div>
-                ${
-                  !done
-                    ? html`
-                        <div class="particle-tools">
-                          <button class="secondary" @click=${() => act('add')}>
-                            Lägg till partikel
-                          </button>
-                          <button class="text-button" @click=${() => act('reset')}>
-                            Återställ meningen
-                          </button>
-                        </div>
+            : !done
+              ? html`
+                  <div
+                    class="particle-sentence particle-editing"
+                    lang="ja"
+                    role="group"
+                    aria-label="Redigera partiklar i meningen"
+                  >
+                    ${state.tokens.map(
+                      (token, index) => html`
+                        ${placing ? html`<button type="button" class="particle-position" aria-label="Placera före ${token.text}, position ${index + 1}" @click=${() => act('position', { index })}>＋</button>` : ''}
                         ${
-                          editor
-                            ? html`<div
-                                class="particle-editor"
-                                role="region"
-                                aria-label="Partikelverktyg"
+                          token.particle
+                            ? html`<button
+                                type="button"
+                                class="particle-token ${editor?.id === token.id ? 'selected' : ''}"
+                                data-token-id=${token.id}
+                                aria-label="Ändra ${token.text}, del ${index + 1}"
+                                aria-pressed=${editor?.id === token.id}
+                                @click=${() => act('select', { id: token.id })}
                               >
-                                <p role="status">
-                                  ${placing ? 'Välj ett plustecken i meningen som placering.' : choosing ? 'Välj partikel:' : html`Vald partikel: <strong lang="ja">${selectedToken?.text}</strong>`}
-                                </p>
-                                <div class="particle-tools">
-                                  ${
-                                    editor.mode === 'selected'
-                                      ? html` <button
-                                            class="secondary"
-                                            @click=${() => act('replace', { id: editor.id })}
-                                          >
-                                            Byt
-                                          </button>
-                                          <button
-                                            class="secondary"
-                                            @click=${() => act('remove', { id: editor.id })}
-                                          >
-                                            Ta bort
-                                          </button>
-                                          <button
-                                            class="secondary"
-                                            @click=${() => act('move', { id: editor.id })}
-                                          >
-                                            Flytta
-                                          </button>`
-                                      : ''
-                                  }
-                                  ${choosing ? particleChoices.map((text) => html`<button class="particle-option secondary" lang="ja" @click=${() => act('choice', { text })}>${text}</button>`) : ''}
-                                  <button class="text-button" @click=${() => act('cancel')}>
-                                    Avbryt
-                                  </button>
-                                </div>
-                              </div>`
-                            : ''
+                                ${token.text}
+                              </button>`
+                            : html`<span>${token.text}</span>`
                         }
-                      `
-                    : html`
-                        <div
-                          class="feedback ${state.marking.ok && state.correctionOk ? 'good' : 'again'}"
-                          role="status"
+                      `,
+                    )}
+                  </div>
+                  <div class="particle-tools">
+                    <button class="secondary" @click=${() => act('add')}>Lägg till partikel</button>
+                    <button class="text-button" @click=${() => act('reset')}>
+                      Återställ meningen
+                    </button>
+                  </div>
+                  ${
+                    editor
+                      ? html`<div
+                          class="particle-editor"
+                          role="region"
+                          aria-label="Partikelverktyg"
                         >
-                          <h3>
-                            ${state.marking.ok && state.correctionOk ? 'Båda stegen är rätt!' : 'Jämför dina två steg'}
-                          </h3>
-                          <p>
-                            Steg 1: ${state.marking.ok ? 'Rätt' : 'Behöver övas'} —
-                            ${state.marking.right.length} rätt markerade,
-                            ${state.marking.wrong.length} fel markerade,
-                            ${state.marking.missed.length} missade.
+                          <p role="status">
+                            ${placing ? 'Välj ett plustecken i meningen som placering.' : choosing ? 'Välj partikel:' : html`Vald partikel: <strong lang="ja">${selectedToken?.text}</strong>`}
                           </p>
-                          <p>
-                            Steg 2:
-                            ${state.correctionOk ? 'Rätt mening' : 'Meningen behöver rättas'}.
-                          </p>
-                          <p>
-                            <strong>Godtaget svar:</strong>
-                            <span lang="ja">${q.answers.join(' / ')}</span>
-                          </p>
-                          <p>${languageText(q.explanation)}</p>
-                          ${speechButton(ctx, q.answers[0], 'Lyssna på svaret')}
-                        </div>
-                        ${ratings()}
-                      `
-                }
-              `
+                          <div class="particle-tools">
+                            ${
+                              editor.mode === 'selected'
+                                ? html` <button
+                                      class="secondary"
+                                      @click=${() => act('replace', { id: editor.id })}
+                                    >
+                                      Byt
+                                    </button>
+                                    <button
+                                      class="secondary"
+                                      @click=${() => act('remove', { id: editor.id })}
+                                    >
+                                      Ta bort
+                                    </button>
+                                    <button
+                                      class="secondary"
+                                      @click=${() => act('move', { id: editor.id })}
+                                    >
+                                      Flytta
+                                    </button>`
+                                : ''
+                            }
+                            ${choosing ? particleChoices.map((text) => html`<button class="particle-option secondary" lang="ja" @click=${() => act('choice', { text })}>${text}</button>`) : ''}
+                            <button class="text-button" @click=${() => act('cancel')}>
+                              Avbryt
+                            </button>
+                          </div>
+                        </div>`
+                      : ''
+                  }
+                `
+              : html`
+                  <div
+                    class="feedback ${state.marking.ok && state.correctionOk ? 'good' : 'again'}"
+                    role="status"
+                  >
+                    <h3>
+                      ${state.marking.ok && state.correctionOk ? 'Båda stegen är rätt!' : 'Jämför dina två steg'}
+                    </h3>
+                    <p>
+                      Steg 1: ${state.marking.ok ? 'Rätt' : 'Behöver övas'} —
+                      ${state.marking.right.length} rätt markerade, ${state.marking.wrong.length}
+                      fel markerade, ${state.marking.missed.length} missade.
+                    </p>
+                    <p>
+                      Steg 2: ${state.correctionOk ? 'Rätt mening' : 'Meningen behöver rättas'}.
+                    </p>
+                    <div class="particle-comparison-card" aria-label="Jämförelse av meningen">
+                      ${
+                        state.correctionOk
+                          ? html`
+                              <div class="particle-comparison-row correct-only">
+                                <div class="particle-comparison-label">
+                                  <span class="particle-indicator right" aria-hidden="true">✓</span>
+                                  <span>Rätt mening</span>
+                                </div>
+                                <div
+                                  class="particle-sentence particle-comparison-sentence"
+                                  lang="ja"
+                                >
+                                  ${targetTokens.map((token) =>
+                                    token.particle
+                                      ? html`<span
+                                          class="particle-result-badge right"
+                                          aria-label="${token.text}, partikel"
+                                          >${token.text}</span
+                                        >`
+                                      : html`<span>${token.text}</span>`,
+                                  )}
+                                </div>
+                              </div>
+                            `
+                          : html`
+                              <div class="particle-comparison-row user-row">
+                                <div class="particle-comparison-label">
+                                  <span class="particle-indicator wrong" aria-hidden="true">×</span>
+                                  <span>Ditt svar</span>
+                                </div>
+                                <div
+                                  class="particle-sentence particle-comparison-sentence"
+                                  lang="ja"
+                                >
+                                  ${evaluatedUserTokens.map((token) =>
+                                    token.particle
+                                      ? html`<span
+                                          class="particle-result-badge ${token.status}"
+                                          aria-label="${token.text}, ${token.status === 'right' ? 'rätt' : 'felaktig'} partikel"
+                                        >
+                                          ${token.text}
+                                          <span class="particle-symbol" aria-hidden="true"
+                                            >${token.status === 'right' ? '✓' : '×'}</span
+                                          >
+                                        </span>`
+                                      : html`<span>${token.text}</span>`,
+                                  )}
+                                </div>
+                              </div>
+                              <div class="particle-comparison-row target-row">
+                                <div class="particle-comparison-label">
+                                  <span class="particle-indicator right" aria-hidden="true">✓</span>
+                                  <span>Korrekt svar</span>
+                                </div>
+                                <div
+                                  class="particle-sentence particle-comparison-sentence"
+                                  lang="ja"
+                                >
+                                  ${targetTokens.map((token) =>
+                                    token.particle
+                                      ? html`<span
+                                          class="particle-result-badge right"
+                                          aria-label="${token.text}, partikel"
+                                          >${token.text}</span
+                                        >`
+                                      : html`<span>${token.text}</span>`,
+                                  )}
+                                </div>
+                              </div>
+                            `
+                      }
+                    </div>
+                    <p>${languageText(q.explanation)}</p>
+                    ${speechButton(ctx, q.answers[0], 'Lyssna på svaret')}
+                  </div>
+                  ${ratings()}
+                `
         }
         <div class="question-actions">
           ${s.index > 0 ? html`<button class="secondary" @click=${() => ctx.jump(s.index - 1)}>Föregående</button>` : html`<span></span>`}
