@@ -80,6 +80,47 @@ test('ten players finish the last round with every answer and rating saved exact
   assert.equal((await m.profile(9)).matchesPlayed, 1);
 });
 
+test('answer receipts reconcile a lost acknowledgement without changing the first choice or score', async () => {
+  const m = await match(2);
+  await m.update({ 'game.roundStartTime': Date.now() - 100 });
+  const question = (await m.read()).game.questions[0];
+  const submit = (choice, id = 'first-attempt') =>
+    m.as(0, () => mp.submitPlayerAnswer(m.code, m.users[0].uid, 0, choice, id));
+  const receipt = await submit(question.correctAnswer);
+  assert.equal(receipt.status, 'accepted');
+  assert.equal(receipt.answer.attemptId, 'first-attempt');
+  const saved = await m.read();
+  // The caller discards the first receipt and retries the stable attempt.
+  assert.deepEqual(await submit(question.correctAnswer), {
+    status: 'already-received',
+    answer: receipt.answer,
+  });
+  assert.deepEqual(await submit('different choice', 'second-attempt'), {
+    status: 'already-received',
+    answer: receipt.answer,
+  });
+  assert.deepEqual(await m.read(), saved);
+  assert.deepEqual((await m.answerDocument(0, 0)).data(), receipt.answer);
+  await m.update({ 'game.currentRoundIndex': 1 });
+  assert.equal((await submit(question.correctAnswer)).status, 'already-received');
+  assert.equal(
+    (await m.as(1, () => mp.submitPlayerAnswer(m.code, m.users[1].uid, 0, 'x'))).status,
+    'stale-round',
+  );
+});
+
+test('answer receipts distinguish late, closed and rejected rounds', async () => {
+  const m = await match(2);
+  const submit = () => m.as(0, () => mp.submitPlayerAnswer(m.code, m.users[0].uid, 0, 'x'));
+  await m.update({ 'game.roundStartTime': Date.now() - 61000 });
+  assert.equal((await submit()).status, 'late');
+  await m.update({ 'game.status': 'round_end' });
+  assert.equal((await submit()).status, 'closed');
+  await m.update({ 'game.status': 'playing', 'game.roundStartTime': Date.now() + 10000 });
+  assert.equal((await submit()).status, 'rejected');
+  assert.equal((await m.answerDocument(0, 0)).exists(), false);
+});
+
 test('answer API rejects submissions during the initial countdown', async () => {
   const m = await match(2);
   await m.update({ 'game.roundStartTime': Date.now() + 3000 });

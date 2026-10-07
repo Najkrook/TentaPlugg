@@ -10,11 +10,30 @@ import {
   runTransaction,
 } from 'firebase/firestore';
 import { db } from './cloud.js';
-import { multiplayerNow, synchronizeMultiplayerClock } from './multiplayer-clock.js';
+import {
+  multiplayerNow,
+  synchronizeMultiplayerClock,
+  getMultiplayerClock,
+  isMultiplayerClockValid,
+  invalidateMultiplayerClock,
+  simulateMonotonicPause,
+  MAX_CLOCK_UNCERTAINTY_MS,
+  MAX_CLOCK_AGE_MS,
+} from './multiplayer-clock.js';
 import { questions } from './data.js';
 import { extraQuestions } from './extra-content.js';
 import { vocabularyList, kanjiList } from './vocabulary-data.js';
 import { normalize } from './engine.js';
+
+export {
+  getMultiplayerClock,
+  isMultiplayerClockValid,
+  synchronizeMultiplayerClock,
+  invalidateMultiplayerClock,
+  simulateMonotonicPause,
+  MAX_CLOCK_UNCERTAINTY_MS,
+  MAX_CLOCK_AGE_MS,
+};
 
 export const DEFAULT_ELO = 1200;
 export const K_FACTOR = 32;
@@ -687,6 +706,7 @@ async function ensureLeaderboardProfile(user) {
 export async function createLobby(user, category) {
   if (!user || !user.uid) throw new Error('Inloggning krävs');
   await synchronizeMultiplayerClock(db, user.uid);
+  const clock = getMultiplayerClock(db);
   const code = generateLobbyCode();
   const lobbyRef = doc(db, 'lobbies', code);
 
@@ -715,6 +735,8 @@ export async function createLobby(user, category) {
         elo: hostElo,
         joinedAt: now,
         score: 0,
+        ready: clock.valid,
+        clockStatus: clock.status,
       },
     },
     playerCount: 1,
@@ -743,11 +765,36 @@ export async function sendHeartbeat(lobbyId, uid) {
 }
 
 /**
+ * Updates a player's clock readiness in the lobby.
+ */
+export async function updatePlayerClockStatus(lobbyId, uid, clock = getMultiplayerClock(db)) {
+  if (!lobbyId || !uid) return;
+  const lobbyRef = doc(db, 'lobbies', lobbyId);
+  try {
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(lobbyRef);
+      if (!snap.exists()) return;
+      const data = snap.data();
+      if (data.status !== 'waiting') return;
+      const players = data.players || {};
+      if (!players[uid]) return;
+      if (players[uid].ready === clock.valid && players[uid].clockStatus === clock.status) return;
+      tx.update(lobbyRef, {
+        [`players.${uid}.ready`]: clock.valid,
+        [`players.${uid}.clockStatus`]: clock.status,
+        updatedAt: getMultiplayerNow(),
+      });
+    });
+  } catch {}
+}
+
+/**
  * Joins an existing lobby (supports up to 10 players).
  */
 export async function joinLobby(lobbyId, user) {
   if (!user || !user.uid) throw new Error('Inloggning krävs');
   await synchronizeMultiplayerClock(db, user.uid);
+  const clock = getMultiplayerClock(db);
   const cleanId = lobbyId.toUpperCase().trim();
   const lobbyRef = doc(db, 'lobbies', cleanId);
 
@@ -770,6 +817,7 @@ export async function joinLobby(lobbyId, user) {
         elo: data.host.elo || DEFAULT_ELO,
         joinedAt: data.createdAt || getMultiplayerNow(),
         score: 0,
+        ready: true,
       },
     };
 
@@ -788,6 +836,8 @@ export async function joinLobby(lobbyId, user) {
       elo: guestElo,
       joinedAt: now,
       score: 0,
+      ready: clock.valid,
+      clockStatus: clock.status,
     };
 
     const updatedPlayers = {
@@ -878,6 +928,11 @@ export async function startMatch(lobbyId) {
     const data = snap.data();
     if (data.status !== 'waiting') return data.game;
 
+    const clock = getMultiplayerClock(db);
+    if (!clock.valid) {
+      throw new Error('Kunde inte starta: matchklockan är inte synkroniserad');
+    }
+
     const playersMap = data.players || {
       [data.host.uid]: { ...data.host, joinedAt: getMultiplayerNow(), score: 0 },
       ...(data.guest
@@ -888,6 +943,12 @@ export async function startMatch(lobbyId) {
     const count = Object.keys(playersMap).length;
     if (count < MIN_PLAYERS) {
       throw new Error('Väntar på att minst en till motståndare ansluter');
+    }
+
+    for (const p of Object.values(playersMap)) {
+      if (p.ready === false) {
+        throw new Error('Väntar på att alla spelare ska bli redo');
+      }
     }
 
     const questionsList = generateQuestionsForCategory(data.category, QUESTIONS_PER_MATCH);
@@ -933,23 +994,40 @@ export async function startMatch(lobbyId) {
  * Writes atomically to `/lobbies/{lobbyId}/answers/{roundIndex}_{uid}`
  * and updates game state in transaction.
  * If all connected players have answered or if last round finishes, updates standings.
+ * Returns { status, answer? }: accepted/already-received include the persisted
+ * answer; late/stale-round/closed/rejected never imply success. Transport errors
+ * reject the promise. Retrying callers must retain their choice and attemptId.
  */
-export async function submitPlayerAnswer(lobbyId, uid, roundIndex, selectedAnswer) {
+export async function submitPlayerAnswer(
+  lobbyId,
+  uid,
+  roundIndex,
+  selectedAnswer,
+  attemptId = crypto.randomUUID(),
+) {
   const answerRef = doc(db, 'lobbies', lobbyId, 'answers', `${roundIndex}_${uid}`);
   const lobbyRef = doc(db, 'lobbies', lobbyId);
 
   return runTransaction(db, async (tx) => {
     const snap = await tx.get(lobbyRef);
-    if (!snap.exists()) return null;
+    if (!snap.exists()) return { status: 'closed' };
     const data = snap.data();
-    if (!data.game) return null;
+    if (!data.game) return { status: 'closed' };
 
     const game = data.game;
     const now = getMultiplayerNow();
 
-    if (game.currentRoundIndex !== roundIndex) return null;
+    // Reconcile even after the round has advanced: a lost acknowledgement must
+    // never turn a committed answer into another choice or another score.
+    const existing = game.answers?.[roundIndex]?.[uid];
+    if (existing && !existing.timedOut) return { status: 'already-received', answer: existing };
+    if (!isMultiplayerClockValid(db)) return { status: 'rejected', reason: 'clock-invalid' };
+    if (game.currentRoundIndex !== roundIndex) return { status: 'stale-round' };
+    if (game.status !== 'playing' || existing) return { status: 'closed' };
+    if (isRoundExpired(game, now)) return { status: 'late' };
     const updatedGame = evaluateRound(game, uid, selectedAnswer, now, data.players);
-    if (updatedGame === game) return null;
+    if (updatedGame === game) return { status: 'rejected' };
+    updatedGame.answers[roundIndex][uid].attemptId = attemptId;
 
     const updatedPlayers = { ...(data.players || {}) };
     for (const pUid of Object.keys(updatedGame.scores || {})) {
@@ -971,7 +1049,7 @@ export async function submitPlayerAnswer(lobbyId, uid, roundIndex, selectedAnswe
     }
     tx.set(answerRef, updatedGame.answers[roundIndex][uid]);
 
-    return updatedGame;
+    return { status: 'accepted', answer: updatedGame.answers[roundIndex][uid] };
   });
 }
 
@@ -1133,7 +1211,9 @@ export function subscribeToLobby(lobbyId, callback, onError) {
   const lobbyRef = doc(db, 'lobbies', lobbyId);
   return onSnapshot(
     lobbyRef,
+    { includeMetadataChanges: true },
     (snap) => {
+      if (snap.metadata.hasPendingWrites) return;
       if (snap.exists()) {
         callback(snap.data());
       } else {

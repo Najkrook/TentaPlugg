@@ -43,10 +43,12 @@ let activeUserUid = null;
 let unloadRegistered = false;
 let lobbyBusy = false;
 let viewEpoch = 0;
+let answerAttempt = null;
 
 export function resetMultiplayerView(uid = null) {
   const leaving = activeLobbyId && uid ? leaveLobby(activeLobbyId, uid) : Promise.resolve();
   viewEpoch++;
+  answerAttempt = null;
   if (lobbyUnsub) {
     lobbyUnsub();
     lobbyUnsub = null;
@@ -78,9 +80,11 @@ export function resetMultiplayerView(uid = null) {
 
 function watchLobby(ctx, code) {
   lobbyUnsub?.();
+  const epoch = viewEpoch;
   lobbyUnsub = subscribeToLobby(
     code,
     (data) => {
+      if (epoch !== viewEpoch || activeLobbyId !== code) return;
       if (!data) {
         resetMultiplayerView();
         feedbackMessage = 'Lobbyn har stängts.';
@@ -90,6 +94,7 @@ function watchLobby(ctx, code) {
       ctx.render();
     },
     (error) => {
+      if (epoch !== viewEpoch || activeLobbyId !== code) return;
       feedbackMessage = error.message || 'Kunde inte hämta matchen';
       ctx.render();
     },
@@ -673,6 +678,56 @@ function waitingRoomView(ctx) {
 /* =========================================================================
    4. Live Match Arena View (Kahoot-Style)
    ========================================================================= */
+function isCurrentAttempt(attempt) {
+  return (
+    answerAttempt === attempt &&
+    attempt.epoch === viewEpoch &&
+    attempt.lobbyId === activeLobbyId &&
+    attempt.uid === activeUserUid &&
+    currentLobbyData?.game?.currentRoundIndex === attempt.roundIndex
+  );
+}
+
+function confirmAnswer(attempt, answer, ctx) {
+  if (attempt.status === 'confirmed') return;
+  attempt.status = 'confirmed';
+  attempt.answer = answer;
+  playAnimeSound(answer.isCorrect ? 'wow' : 'nani', ctx.theme);
+}
+
+async function deliverAnswer(attempt, ctx) {
+  if (!isCurrentAttempt(attempt)) return;
+  attempt.status = 'sending';
+  ctx.render();
+  try {
+    const receipt = await submitAnswer(
+      attempt.lobbyId,
+      attempt.uid,
+      attempt.roundIndex,
+      attempt.choice,
+      attempt.id,
+    );
+    if (!isCurrentAttempt(attempt)) return;
+    if (
+      (receipt?.status === 'accepted' || receipt?.status === 'already-received') &&
+      receipt.answer
+    ) {
+      confirmAnswer(attempt, receipt.answer, ctx);
+    } else if (attempt.status !== 'confirmed') {
+      attempt.status = 'rejected';
+      attempt.message =
+        receipt?.status === 'late'
+          ? 'Svaret kom för sent. Vänta på nästa fråga.'
+          : 'Svaret kunde inte godtas. Vänta på nästa fråga.';
+    }
+  } catch (error) {
+    if (!isCurrentAttempt(attempt) || attempt.status === 'confirmed') return;
+    attempt.status = 'error';
+    attempt.message = 'Kunde inte bekräfta svaret. Försök skicka samma val igen.';
+  }
+  if (isCurrentAttempt(attempt)) ctx.render();
+}
+
 function arenaView(ctx) {
   const { user } = ctx;
   const game = currentLobbyData.game;
@@ -688,6 +743,8 @@ function arenaView(ctx) {
   );
 
   const roundIdx = game.currentRoundIndex || 0;
+  if (answerAttempt && !isCurrentAttempt(answerAttempt)) answerAttempt = null;
+  const attempt = answerAttempt;
   const currentQ = game.questions?.[roundIdx] || { prompt: '', choices: [] };
 
   const playersMap = currentLobbyData.players || {
@@ -703,7 +760,9 @@ function arenaView(ctx) {
 
   const roundAnswers = game.answers?.[roundIdx] || {};
   const answeredCount = activeUids.filter((uid) => Boolean(roundAnswers[uid])).length;
-  const myAnswer = user?.uid ? roundAnswers[user.uid] : null;
+  const savedAnswer = user?.uid ? roundAnswers[user.uid] : null;
+  if (attempt && savedAnswer && !savedAnswer.timedOut) confirmAnswer(attempt, savedAnswer, ctx);
+  const myAnswer = savedAnswer || (attempt?.status === 'confirmed' ? attempt.answer : null);
   const hasAnswered = Boolean(myAnswer);
   const roundWinners = game.roundWinners || {};
   const roundWinnerUid = roundWinners[roundIdx];
@@ -792,6 +851,35 @@ function arenaView(ctx) {
               </div>
 
               <!-- 4 Multiple Choice Buttons -->
+              ${
+                attempt
+                  ? html`<p role="status" class="answer-delivery-status">
+                      ${
+                        attempt.status === 'confirmed'
+                          ? 'Svar mottaget.'
+                          : game.status !== 'playing' || isRoundExpired(game, now)
+                            ? 'Rundan är avslutad. Vänta på nästa fråga.'
+                            : attempt.status === 'sending'
+                              ? 'Skickar svar…'
+                              : attempt.message
+                      }
+                      ${
+                        attempt.status === 'error' &&
+                        game.status === 'playing' &&
+                        !isRoundExpired(game, now)
+                          ? html`<button
+                              class="secondary"
+                              @click=${() => {
+                                if (attempt.status === 'error') deliverAnswer(attempt, ctx);
+                              }}
+                            >
+                              Skicka samma svar igen
+                            </button>`
+                          : ''
+                      }
+                    </p>`
+                  : ''
+              }
               <div class="choices-grid">
                 ${currentQ.choices.map((choice) => {
                   const wasChosen = myAnswer?.answer === choice;
@@ -807,24 +895,27 @@ function arenaView(ctx) {
                     <button
                       type="button"
                       class="choice-btn ${btnState}"
-                      ?disabled=${hasAnswered || hasForfeited || game.status !== 'playing' || isRoundExpired(game, now)}
-                      @click=${async () => {
-                        if (hasAnswered || hasForfeited || game.status !== 'playing') return;
-                        const isCorrect = choice === currentQ.correctAnswer;
-                        if (isCorrect) {
-                          playAnimeSound('wow', ctx.theme);
-                        } else {
-                          playAnimeSound('nani', ctx.theme);
-                        }
-                        const epoch = viewEpoch;
-                        try {
-                          await submitAnswer(activeLobbyId, user.uid, roundIdx, choice);
-                        } catch (error) {
-                          if (epoch === viewEpoch) {
-                            feedbackMessage = error.message || 'Kunde inte skicka svaret';
-                            ctx.render();
-                          }
-                        }
+                      ?disabled=${Boolean(attempt) || hasAnswered || hasForfeited || game.status !== 'playing' || isRoundExpired(game, now)}
+                      @click=${() => {
+                        if (
+                          answerAttempt ||
+                          hasAnswered ||
+                          hasForfeited ||
+                          game.status !== 'playing' ||
+                          isRoundExpired(game, getMultiplayerNow()) ||
+                          currentLobbyData?.game !== game
+                        )
+                          return;
+                        answerAttempt = {
+                          id: crypto.randomUUID(),
+                          choice,
+                          roundIndex: roundIdx,
+                          lobbyId: activeLobbyId,
+                          uid: user.uid,
+                          epoch: viewEpoch,
+                          status: 'sending',
+                        };
+                        deliverAnswer(answerAttempt, ctx);
                       }}
                     >
                       <span class="choice-text">${languageText(choice)}</span>

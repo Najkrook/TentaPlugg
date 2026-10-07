@@ -388,3 +388,191 @@ test('leaving a live match records a forfeit, and leaving a waiting room removes
     await guest.close();
   }
 });
+
+for (const input of ['mouse', 'keyboard', 'touch']) {
+  test(`first answer stays locked during delayed delivery (${input})`, async ({
+    page,
+    browser,
+  }, testInfo) => {
+    const guest = await browser.newPage();
+    const errors = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    guest.on('pageerror', (error) => errors.push(error.message));
+    for (const client of [page, guest]) {
+      client.on('console', (message) => {
+        if (message.type() === 'error') errors.push(message.text());
+      });
+    }
+    try {
+      const uid = await login(page);
+      await expect(page).toHaveTitle('TentaPlugg · Japanska');
+      await expect(page).toHaveURL('http://127.0.0.1:5175/multiplayer');
+      await expect(page.locator('vite-error-overlay')).toHaveCount(0);
+      await login(guest);
+      const code = await create(page);
+      await join(guest, code);
+      await page.getByRole('button', { name: 'Starta matchen!' }).click();
+      await expect(page.locator('.choices-grid button').first()).toBeEnabled();
+      const lobby = await read(guest, 'lobbies', code);
+      const question = lobby.game.questions[0];
+      const correct = page
+        .locator('.choices-grid')
+        .getByRole('button', { name: question.correctAnswer, exact: true });
+      const wrong = page.locator('.choices-grid').getByRole('button', {
+        name: question.choices.find((c) => c !== question.correctAnswer),
+        exact: true,
+      });
+      let delayed = false;
+      await page.route('**/documents:batchGet**', async (route) => {
+        if (!delayed) {
+          delayed = true;
+          await new Promise((resolve) => setTimeout(resolve, 2500));
+        }
+        await route.continue();
+      });
+      if (input === 'keyboard') {
+        await correct.focus();
+        await page.keyboard.press('Enter');
+        await wrong.press('Enter');
+      } else if (input === 'touch' && testInfo.project.name === 'webkit-mobile') {
+        await correct.tap();
+        const box = await wrong.boundingBox();
+        await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+      } else {
+        await correct.dblclick();
+        // Dispatch also exercises a queued event whose handler predates the render.
+        await wrong.dispatchEvent('click');
+      }
+      await expect(page.locator('.answer-delivery-status')).toContainText('Skickar svar…');
+      expect(await page.locator('.choices-grid button:enabled').count()).toBe(0);
+      expect(await page.locator('.btn-correct, .btn-wrong, .choice-badge').count()).toBe(0);
+      expect((await read(guest, 'lobbies', code)).game.answers[0]?.[uid]).toBeUndefined();
+      if (input === 'mouse')
+        await page.screenshot({ path: testInfo.outputPath('answer-sending.png') });
+      await expect(page.locator('.answer-delivery-status')).toContainText('Svar mottaget.');
+      expect(delayed).toBe(true);
+      const saved = await read(guest, 'lobbies', code);
+      expect(saved.game.answers[0][uid]).toMatchObject({
+        answer: question.correctAnswer,
+        isCorrect: true,
+      });
+      expect(saved.game.answers[0][uid].attemptId).toBeTruthy();
+      expect(saved.game.scores[uid]).toBeGreaterThan(0);
+      await expect(page.locator('.btn-correct .choice-text')).toHaveText(question.correctAnswer);
+      expect(errors).toEqual([]);
+    } finally {
+      await page.unrouteAll({ behavior: 'wait' });
+      await guest.close();
+    }
+  });
+}
+
+test('failed delivery retries only the locked choice', async ({ page, browser }) => {
+  const guest = await browser.newPage();
+  try {
+    const uid = await login(page);
+    await login(guest);
+    const code = await create(page);
+    await join(guest, code);
+    await page.getByRole('button', { name: 'Starta matchen!' }).click();
+    await expect(page.locator('.choices-grid button').first()).toBeEnabled();
+    const question = (await read(guest, 'lobbies', code)).game.questions[0];
+    await page.route('**/documents:batchGet**', (route) =>
+      route.fulfill({
+        status: 403,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          error: { code: 403, status: 'PERMISSION_DENIED', message: 'Injected delivery failure' },
+        }),
+      }),
+    );
+    await page
+      .locator('.choices-grid')
+      .getByRole('button', { name: question.correctAnswer, exact: true })
+      .click();
+    await expect(page.locator('.answer-delivery-status')).toContainText(
+      'Kunde inte bekräfta svaret',
+    );
+    expect(await page.locator('.choices-grid button:enabled').count()).toBe(0);
+    expect(await page.locator('.btn-correct, .btn-wrong').count()).toBe(0);
+    await page.unrouteAll({ behavior: 'wait' });
+    await page.getByRole('button', { name: 'Skicka samma svar igen' }).dblclick();
+    await expect(page.locator('.answer-delivery-status')).toContainText('Svar mottaget.');
+    expect((await read(guest, 'lobbies', code)).game.answers[0][uid].answer).toBe(
+      question.correctAnswer,
+    );
+  } finally {
+    await page.unrouteAll({ behavior: 'wait' });
+    await guest.close();
+  }
+});
+
+test('late delivery result cannot lock the next round or a reset view', async ({
+  page,
+  browser,
+}) => {
+  const guest = await browser.newPage();
+  try {
+    await login(page);
+    await login(guest);
+    const code = await create(page);
+    await join(guest, code);
+    await page.getByRole('button', { name: 'Starta matchen!' }).click();
+    await expect(page.locator('.choices-grid button').first()).toBeEnabled();
+    let release;
+    let intercepted;
+    const gate = new Promise((resolve) => {
+      release = resolve;
+    });
+    const arrived = new Promise((resolve) => {
+      intercepted = resolve;
+    });
+    await page.route('**/documents:batchGet**', async (route) => {
+      intercepted();
+      await gate;
+      await route.continue();
+    });
+    await page.locator('.choices-grid button').first().click();
+    await arrived;
+    await guest.evaluate(async (code) => {
+      const { db } = await import('/src/cloud.js');
+      const { getMultiplayerNow } = await import('/src/multiplayer.js');
+      const { doc, updateDoc } = window.multiplayerTestFirestore;
+      await updateDoc(doc(db, 'lobbies', code), {
+        'game.currentRoundIndex': 1,
+        'game.roundStartTime': getMultiplayerNow(),
+      });
+    }, code);
+    await expect(page.locator('.round-badge')).toHaveText('Fråga 2 / 10');
+    release();
+    await page.unrouteAll({ behavior: 'wait' });
+    await expect(page.locator('.choices-grid button').first()).toBeEnabled();
+    await expect(page.locator('.answer-delivery-status')).toHaveCount(0);
+    // Reset while the next request is pending; its response must not restore arena feedback.
+    const resetGate = new Promise((resolve) => {
+      release = resolve;
+    });
+    const resetArrived = new Promise((resolve) => {
+      intercepted = resolve;
+    });
+    await page.route('**/documents:batchGet**', async (route) => {
+      intercepted();
+      await resetGate;
+      await route.continue();
+    });
+    await page.locator('.choices-grid button').first().click();
+    await resetArrived;
+    await page.evaluate(async () => {
+      const { resetMultiplayerView } = await import('/src/views/multiplayer.js');
+      await resetMultiplayerView();
+    });
+    release();
+    await page.unrouteAll({ behavior: 'wait' });
+    await arena(page);
+    await expect(page.locator('.create-lobby-card')).toBeVisible();
+    await expect(page.locator('.answer-delivery-status')).toHaveCount(0);
+  } finally {
+    await page.unrouteAll({ behavior: 'wait' });
+    await guest.close();
+  }
+});

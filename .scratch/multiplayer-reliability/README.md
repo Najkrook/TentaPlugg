@@ -1,6 +1,6 @@
 # Multiplayer: godkänd specifikation och ärenden
 
-**Status:** ready-for-agent — specifikationen och sju tickets publicerades lokalt efter användarens godkännande 2026-10-07. Implementation återstår.
+**Status:** ready-for-agent — specifikationen och sju tickets publicerades lokalt efter användarens godkännande 2026-10-07. Ticket 02 är implementerad och verifierad; övriga sex tickets återstår.
 
 [Läs hela specifikationen](spec.md).
 
@@ -18,7 +18,7 @@ Testa de verkliga användarflödena med flera isolerade webbläsarklienter mot l
 6. **[Återanslut samma spelare efter omladdning](issues/06-ateranslut-efter-omladdning.md).** Blocked by: 02, 05 (04 ingår transitivt). Levererar återinträde till aktuellt läge utan dubbla svar, fel konto eller återupplivat avhopp. Täcker F5.
 7. **[Visa båda svarsfönstren och samma deadline överallt](issues/07-visa-alla-tidsgranser.md).** Blocked by: 03. Levererar synlig 60-sekunderstimer, korrekt växling till åtta sekunder och konsekvent knapp-/timeoutbeteende. Täcker F7.
 
-De första tillgängliga ärendena är 01 och 02. Vart och ett innehåller egna acceptanskriterier, verifierbar leverans och motivering för sina blockerare. Ingen separat horisontell refaktorering föreslås.
+Ticket 02 är klar (2026-10-07). Nästa tillgängliga ärende är 01; ticket 03 väntar fortfarande på 01. Vart och ett innehåller egna acceptanskriterier, verifierbar leverans och motivering för sina blockerare. Ingen separat horisontell refaktorering föreslås.
 
 ## Godkända gränser
 
@@ -39,7 +39,7 @@ Användaren har valt lokala Markdown-filer, standardetiketterna och AGENTS.md. F
 - [Standardetiketter](../../docs/agents/triage-labels.md).
 - [Domändokumentens layout och läsregler](../../docs/agents/domain.md).
 
-Specifikationen finns som `spec.md` och sju separata tickets i `issues/`, med status `ready-for-agent` och öppet genomförande. Dessa skills kan nu använda konfigurationen, som också kan redigeras direkt vid behov. Ingen implementation, stängning av föräldraärende eller appdeploy ingick i planeringsuppdraget.
+Specifikationen finns som `spec.md` och sju separata tickets i `issues/`, med status `ready-for-agent`. Ticket 02 har `Workflow: done`; övriga har öppet genomförande. Dessa skills kan nu använda konfigurationen, som också kan redigeras direkt vid behov. Ingen implementation, stängning av föräldraärende eller appdeploy ingick i planeringsuppdraget.
 
 ## Godkännande och verifiering
 
