@@ -50,6 +50,7 @@ import {
   pokeSidebarMascot,
 } from './mascot-dialogue.js';
 import { initClickParticles, purgeParticles } from './particles-fx.js';
+import { getCalendarDayIds } from './calendar-days.js';
 const app = document.querySelector('#app');
 const KNOWN_VIEWS = [
   'home',
@@ -254,6 +255,9 @@ function getCtx() {
     progress,
     tts: ttsSupported(),
     setPreferredCount,
+    daysMode: state.daysMode || 'first10',
+    setDaysMode,
+    startDaysPractice,
     start,
     startTask,
     startExam,
@@ -604,7 +608,38 @@ function navigate(id, pushState = true) {
   }
   render(true);
 }
+function setDaysMode(mode) {
+  state.daysMode = mode;
+  persist(true);
+  render();
+}
+function startDaysPractice(mode = state.daysMode || 'first10') {
+  flush();
+  state.daysMode = mode;
+  const ids = getCalendarDayIds(mode);
+  const titles = {
+    first10: 'Månadens dagar: Dag 1–10',
+    exceptions: 'Månadens dagar: Alla undantag',
+    all: 'Månadens dagar: Hela månaden (1–31)',
+  };
+  session = createSession(
+    ids,
+    titles[mode] || 'Månadens dagar',
+    {
+      loopErrors: true,
+      daysMode: mode,
+      topic: 'Dagar',
+      failedLoopIds: [],
+    },
+  );
+  persist(true);
+  render(true);
+}
 async function start(topic, options = {}) {
+  if (topic === 'Dagar') {
+    startDaysPractice(options.daysMode || state.daysMode || 'first10');
+    return;
+  }
   const pref = state.preferredCount || 10;
   const chosenCount = options.count !== undefined ? options.count : pref;
   const isAllDue = chosenCount === 'all';
@@ -761,9 +796,19 @@ function grade(okOrRating, advance = false) {
   recordReview(state, session, q.id, okOrRating, Date.now());
   updateResult(state, session, questions, Date.now());
   persist(true);
+  const isOk = typeof okOrRating === 'boolean' ? okOrRating : okOrRating !== 'again';
+  if (session.loopErrors) {
+    session.failedLoopIds ||= [];
+    if (!isOk) {
+      if (!session.failedLoopIds.includes(q.id)) {
+        session.failedLoopIds.push(q.id);
+      }
+    } else {
+      session.failedLoopIds = session.failedLoopIds.filter((id) => id !== q.id);
+    }
+  }
   if (advance) next();
   else {
-    const isOk = typeof okOrRating === 'boolean' ? okOrRating : okOrRating !== 'again';
     if (isOk) {
       playAnimeSound('wow', state.theme);
     } else {
@@ -774,9 +819,11 @@ function grade(okOrRating, advance = false) {
         ? 'Båda stegen är rättade. Resultatet visas.'
         : isOk
           ? 'Rätt svar.'
-          : q.choices
-            ? 'Inte riktigt. Förklaringen visas.'
-            : 'Ditt svar matchar inte de sparade svaren. Jämför med förklaringen.',
+          : session.loopErrors
+            ? 'Inte helt rätt. Dagen återkommer i slutet av passet!'
+            : q.choices
+              ? 'Inte riktigt. Förklaringen visas.'
+              : 'Ditt svar matchar inte de sparade svaren. Jämför med förklaringen.',
     );
   }
 }
@@ -826,6 +873,19 @@ async function next() {
       return;
     }
   } else if (session.index < session.ids.length - 1) {
+    jump(session.index + 1);
+    return;
+  }
+  if (session.loopErrors && session.failedLoopIds?.length > 0) {
+    const toRepeat = [...session.failedLoopIds];
+    session.failedLoopIds = [];
+    for (const id of toRepeat) {
+      delete session.answers[id];
+      delete session.grades[id];
+      if (session.revealed) delete session.revealed[id];
+      session.ids.push(id);
+    }
+    announce(`Repetition: ${toRepeat.length} dag${toRepeat.length > 1 ? 'ar' : ''} att prova igen!`);
     jump(session.index + 1);
     return;
   }

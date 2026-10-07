@@ -1,8 +1,9 @@
 import { EXERCISE_REFERENCE_DATE } from './config.js';
 import { extraQuestions } from './extra-content.js';
 import { l1l5Questions } from './l1l5-data.js';
+import { calendarDayQuestions } from './calendar-days.js';
 import { enrichQuestion } from './pedagogy.js';
-export { l1l5Questions };
+export { l1l5Questions, calendarDayQuestions };
 export const topics = [
   'Partiklar',
   'Böjningar',
@@ -12,6 +13,7 @@ export const topics = [
   'Moror & stavelser',
   'Ordföljd',
   'Kana',
+  'Dagar',
 ];
 export const questions = [];
 const add = (id, topic, prompt, answer, explanation, extra = {}) =>
@@ -837,7 +839,7 @@ export const guides = [
   },
 ];
 
-questions.push(...extraQuestions, ...l1l5Questions);
+questions.push(...extraQuestions, ...l1l5Questions, ...calendarDayQuestions);
 for (const q of questions) {
   q.section = q.id.replace(/^.*?-/, '').split('-')[0];
   if (/^(gema70-5-|japc11-5\.1-)/.test(q.id)) q.topic = 'Moror & stavelser';

@@ -6442,3 +6442,306 @@ html:not([data-theme='sakura']) .sound-slider,
   background: #fce7f3;
   color: #db2777;
 }
+
+/* Calendar Days Practice Styling */
+.calendar-practice-section {
+  margin-bottom: 28px;
+}
+
+.calendar-panel {
+  background: var(--panel, #ffffff);
+  border: 1px solid var(--line, #dfe6e0);
+  border-radius: 16px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
+}
+
+[data-theme='sakura'] .calendar-panel {
+  background: #ffffff;
+  border: 2px solid #ffd6e7;
+  border-radius: 20px;
+  box-shadow: 0 6px 20px rgba(244, 114, 182, 0.1);
+}
+
+.calendar-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.calendar-panel-title {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: 1;
+  min-width: 260px;
+}
+
+.calendar-mini-badge {
+  font-size: 32px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  background: #eef5f2;
+  border-radius: 12px;
+  border: 1px solid var(--line, #dfe6e0);
+}
+
+[data-theme='sakura'] .calendar-mini-badge {
+  background: #fff0f6;
+  border-color: #ffd6e7;
+}
+
+.calendar-panel-title h2 {
+  margin: 0 0 4px;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--green, #183f37);
+}
+
+[data-theme='sakura'] .calendar-panel-title h2 {
+  color: #8a1746;
+}
+
+.calendar-panel-title p {
+  margin: 0;
+  font-size: 14px;
+  color: var(--muted, #6d7d76);
+}
+
+.calendar-panel-stats {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  min-width: 120px;
+}
+
+.calendar-stat-number {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--green, #183f37);
+}
+
+[data-theme='sakura'] .calendar-stat-number {
+  color: #db2777;
+}
+
+.calendar-panel-stats small {
+  font-size: 12px;
+  color: var(--muted, #6d7d76);
+  margin-bottom: 6px;
+}
+
+.calendar-panel-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding-top: 14px;
+  border-top: 1px solid var(--line, #dfe6e0);
+}
+
+[data-theme='sakura'] .calendar-panel-controls {
+  border-top-color: #fce7f3;
+}
+
+.calendar-mode-picker {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.start-days-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 22px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.topic-card.calendar-topic-card {
+  border-left: 4px solid #10b981;
+}
+
+[data-theme='sakura'] .topic-card.calendar-topic-card {
+  border-left: 4px solid #f43f5e;
+}
+
+/* In-session Calendar Question Card */
+.calendar-question-card {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  margin: 16px 0 20px;
+  padding: 20px;
+  background: var(--bg-alt, #f4f7f5);
+  border: 1px solid var(--line, #dfe6e0);
+  border-radius: 16px;
+}
+
+[data-theme='sakura'] .calendar-question-card {
+  background: #fff5f8;
+  border: 2px solid #ffd6e7;
+  border-radius: 20px;
+}
+
+.calendar-badge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 76px;
+  height: 84px;
+  background: #ffffff;
+  border: 2px solid #d1d5db;
+  border-radius: 12px;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+[data-theme='sakura'] .calendar-badge {
+  border-color: #f472b6;
+  box-shadow: 0 4px 12px rgba(244, 114, 182, 0.2);
+}
+
+.calendar-badge-header {
+  width: 100%;
+  background: #ef4444;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 800;
+  text-align: center;
+  padding: 3px 0;
+  letter-spacing: 0.05em;
+}
+
+[data-theme='sakura'] .calendar-badge-header {
+  background: #f43f5e;
+}
+
+.calendar-badge-day {
+  font-size: 36px;
+  font-weight: 900;
+  color: #111827;
+  line-height: 1.2;
+}
+
+.calendar-question-text {
+  flex: 1;
+}
+
+.calendar-question-text .question-title {
+  margin: 0 0 4px;
+  font-size: 24px;
+}
+
+.calendar-subprompt {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--muted, #6d7d76);
+}
+
+.calendar-instruction {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted, #6d7d76);
+}
+
+/* Feedback Showcase for Calendar Days */
+.calendar-feedback-showcase {
+  margin: 18px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.calendar-feedback-hero {
+  display: flex;
+  align-items: baseline;
+  gap: 18px;
+  background: rgba(255, 255, 255, 0.7);
+  padding: 14px 20px;
+  border-radius: 12px;
+  border: 1px solid var(--line, #dfe6e0);
+}
+
+[data-theme='sakura'] .calendar-feedback-hero {
+  background: #ffffff;
+  border-color: #ffd6e7;
+}
+
+.calendar-feedback-kanji {
+  font-size: 32px;
+  font-weight: 800;
+  color: #111827;
+  letter-spacing: 0.05em;
+}
+
+.calendar-feedback-readings {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.calendar-feedback-kana {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--green, #183f37);
+}
+
+[data-theme='sakura'] .calendar-feedback-kana {
+  color: #db2777;
+}
+
+.calendar-feedback-romaji {
+  font-size: 16px;
+  color: var(--muted, #6d7d76);
+}
+
+.calendar-explanation-box {
+  padding: 14px 18px;
+  border-radius: 10px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.calendar-explanation-box.exception {
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  color: #92400e;
+}
+
+[data-theme='sakura'] .calendar-explanation-box.exception {
+  background: #fff1f2;
+  border-color: #fecdd3;
+  color: #9f1239;
+}
+
+.calendar-explanation-box.regular {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  color: #166534;
+}
+
+.calendar-explanation-label {
+  display: block;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.calendar-explanation-box p {
+  margin: 0;
+}

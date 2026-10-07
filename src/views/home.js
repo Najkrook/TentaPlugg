@@ -4,11 +4,14 @@ import { daysUntil } from '../engine.js';
 import { icon, dateText } from './shared.js';
 import { playAnimeSound } from '../audio.js';
 import { getStudyMascotQuote, pokeStudyMascot } from '../mascot-dialogue.js';
+import { calendarDayQuestions } from '../calendar-days.js';
 export function homeView(ctx) {
   const { state, now, plan } = ctx,
     p = ctx.progress(),
     days = daysUntil(state.examDate, now),
     currentPref = state.preferredCount || 10,
+    daysMode = ctx.daysMode || state.daysMode || 'first10',
+    masteredDays = calendarDayQuestions.filter((q) => state.stats[q.id]?.ok).length,
     studyQuote = ctx.getStudyMascotQuote ? ctx.getStudyMascotQuote() : getStudyMascotQuote(),
     onPokeStudy = () => {
       if (ctx.pokeStudyMascot) {
@@ -189,6 +192,79 @@ export function homeView(ctx) {
         ${days >= 0 && days <= 3 ? 'Sista dagarna: extra fokus på svåra områden och tidigare tentafel.' : 'Repetition först, sedan nya frågor och en bit av en gammal tenta.'}
       </p>
     </section>
+    <section class="section-block calendar-practice-section">
+      <div class="calendar-panel">
+        <div class="calendar-panel-header">
+          <div class="calendar-panel-title">
+            <span class="calendar-mini-badge" aria-hidden="true">📅</span>
+            <div>
+              <h2>Öva på månadens dagar</h2>
+              <p>Månadens datum 1–31 har unika läsningar. Träna in ついたち, ようか och はつか.</p>
+            </div>
+          </div>
+          <div class="calendar-panel-stats">
+            <span class="calendar-stat-number">${masteredDays} / 31</span>
+            <small>bemästrade</small>
+            <div class="mini-track"><span style="width:${(masteredDays / 31) * 100}%"></span></div>
+          </div>
+        </div>
+        <div class="calendar-panel-controls">
+          <div class="calendar-mode-picker">
+            <span class="session-picker-label" id="calendar-mode-label">Välj omfång:</span>
+            <div
+              class="pill-group"
+              role="radiogroup"
+              aria-labelledby="calendar-mode-label"
+              @keydown=${(e) => {
+                const modes = ['first10', 'exceptions', 'all'];
+                const idx = modes.indexOf(daysMode);
+                if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  ctx.setDaysMode?.(modes[(idx + 1) % modes.length]);
+                } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  ctx.setDaysMode?.(modes[(idx - 1 + modes.length) % modes.length]);
+                }
+              }}
+            >
+              <button
+                type="button"
+                role="radio"
+                aria-checked=${daysMode === 'first10'}
+                class="pill-btn ${daysMode === 'first10' ? 'active' : ''}"
+                @click=${() => ctx.setDaysMode?.('first10')}
+              >
+                1–10 (Grunderna)
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked=${daysMode === 'exceptions'}
+                class="pill-btn ${daysMode === 'exceptions' ? 'active' : ''}"
+                @click=${() => ctx.setDaysMode?.('exceptions')}
+              >
+                Undantag (13 st)
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked=${daysMode === 'all'}
+                class="pill-btn ${daysMode === 'all' ? 'active' : ''}"
+                @click=${() => ctx.setDaysMode?.('all')}
+              >
+                Hela månaden (1–31)
+              </button>
+            </div>
+          </div>
+          <button
+            class="primary start-days-btn"
+            @click=${() => ctx.startDaysPractice?.(daysMode)}
+          >
+            Starta övning ${icon('ChevronRight')}
+          </button>
+        </div>
+      </div>
+    </section>
     <section class="section-block">
       <div class="section-title">
         <h2>Vad vill du öva på?</h2>
@@ -200,9 +276,9 @@ export function homeView(ctx) {
         ${topics.map((t, i) => {
           const qs = questions.filter((q) => q.topic === t),
             n = qs.filter((q) => state.stats[q.id]?.ok).length;
-          return html`<button class="topic-card" @click=${() => ctx.start(t)}>
+          return html`<button class="topic-card ${t === 'Dagar' ? 'calendar-topic-card' : ''}" @click=${() => ctx.start(t)}>
             <span class="topic-letter t${i % 5}" lang="ja"
-              >${['は', 'い', '字', '文', '読', '音', '順', 'あ'][i]}</span
+              >${['は', 'い', '字', '文', '読', '音', '順', 'あ', '日'][i] || '日'}</span
             >
             <div>
               <h3>${t}</h3>

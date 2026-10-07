@@ -91,9 +91,23 @@ export function sessionView(ctx) {
             >${q.official ? 'Originalfacit · Lesson5' : q.exam ? 'Originalfråga · modellösning' : 'Extra träning'}</span
           >
         </div>
-        <h1 class="question-title" tabindex="-1" lang=${q.promptLang || 'sv'}>
-          ${languageText(q.prompt)}
-        </h1>
+        ${
+          q.type === 'calendar-day'
+            ? html`<div class="calendar-question-card">
+                <div class="calendar-badge" aria-hidden="true">
+                  <span class="calendar-badge-header">DAG</span>
+                  <span class="calendar-badge-day">${q.dayNumber}</span>
+                </div>
+                <div class="calendar-question-text">
+                  <h1 class="question-title" tabindex="-1" lang="sv">${q.prompt}</h1>
+                  <p class="calendar-subprompt">${q.subprompt}</p>
+                  <p class="calendar-instruction">Skriv vad datumet heter på japanska (hiragana eller romaji):</p>
+                </div>
+              </div>`
+            : html`<h1 class="question-title" tabindex="-1" lang=${q.promptLang || 'sv'}>
+                ${languageText(q.prompt)}
+              </h1>`
+        }
         ${showSpeech ? speechButton(ctx, ask, 'Lyssna på frågan') : ''}
         ${
           q.context
@@ -122,15 +136,22 @@ export function sessionView(ctx) {
               : html`<label class="answer-label" for="answer">Ditt svar</label
                   ><textarea
                     id="answer"
-                    rows=${q.self ? 5 : 2}
+                    rows=${q.self ? 5 : q.type === 'calendar-day' ? 1 : 2}
                     lang=${q.answerLang || 'sv'}
                     .value=${live(value)}
                     ?readonly=${feedback}
                     maxlength="3000"
-                    placeholder=${q.answerLang === 'ja' ? 'Skriv med ditt japanska tangentbord…' : 'Skriv ditt svar här…'}
+                    placeholder=${q.type === 'calendar-day' ? 'T.ex. ついたち eller tsuitachi…' : q.answerLang === 'ja' ? 'Skriv med ditt japanska tangentbord…' : 'Skriv ditt svar här…'}
                     autocapitalize="off"
                     spellcheck="false"
                     @input=${(e) => ctx.answer(e.target.value, false)}
+                    @keydown=${(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        if (!feedback) ctx.check();
+                        else ctx.next();
+                      }
+                    }}
                     @compositionstart=${() => ctx.setComposing(true)}
                     @compositionend=${(e) => {
                       ctx.setComposing(false);
@@ -167,12 +188,34 @@ export function sessionView(ctx) {
                 <h3>
                   ${q.self ? 'Jämför med modellösningen' : s.grades[q.id] ? 'Rätt svar!' : !value.trim() ? 'Inget svar lämnat' : q.choices ? 'Inte riktigt – jämför svaren' : 'Ditt svar matchar inte de sparade svaren'}
                 </h3>
-                ${!q.self && !contrastive ? html`<p class="correct-answer" lang=${q.answerLang || 'sv'}><strong>Godtagna svar:</strong> ${languageText(q.answers?.join(' / '))}</p>` : ''}
-                ${isIncorrect && !q.choices && value.trim() ? html`<p class="feedback-note">Appen jämför med sparade svar och kan missa andra korrekta formuleringar. Jämför innehållet innan du bedömer ditt svar.</p>` : ''}
                 ${
-                  contrastive
-                    ? contrastiveCallout(contrastive, value, q, ctx)
-                    : html`<p>${languageText(q.explanation || q.model)}</p>`
+                  q.type === 'calendar-day'
+                    ? html`<div class="calendar-feedback-showcase">
+                        <div class="calendar-feedback-hero">
+                          <span class="calendar-feedback-kanji" lang="ja">${q.kanji}</span>
+                          <div class="calendar-feedback-readings">
+                            <strong class="calendar-feedback-kana" lang="ja">${q.kana}</strong>
+                            <span class="calendar-feedback-romaji">${q.romaji}</span>
+                          </div>
+                        </div>
+                        ${q.explanation
+                          ? html`<div class="calendar-explanation-box ${q.isException ? 'exception' : 'regular'}">
+                              <span class="calendar-explanation-label">
+                                ${q.isException ? '⚠️ Oregelbunden läsning' : '💡 Mönster'}
+                              </span>
+                              <p>${q.explanation}</p>
+                            </div>`
+                          : ''}
+                      </div>`
+                    : html`
+                        ${!q.self && !contrastive ? html`<p class="correct-answer" lang=${q.answerLang || 'sv'}><strong>Godtagna svar:</strong> ${languageText(q.answers?.join(' / '))}</p>` : ''}
+                        ${isIncorrect && !q.choices && value.trim() ? html`<p class="feedback-note">Appen jämför med sparade svar och kan missa andra korrekta formuleringar. Jämför innehållet innan du bedömer ditt svar.</p>` : ''}
+                        ${
+                          contrastive
+                            ? contrastiveCallout(contrastive, value, q, ctx)
+                            : html`<p>${languageText(q.explanation || q.model)}</p>`
+                        }
+                      `
                 }
                 ${speechButton(ctx, answer, q.self ? 'Lyssna på modellsvaret' : 'Lyssna på svaret')}
                 ${
@@ -236,7 +279,7 @@ export function sessionView(ctx) {
             : ''
         }
         <div class="question-actions">
-          ${s.index > 0 ? html`<button class="secondary" @click=${() => ctx.jump(s.index - 1)}>Föregående</button>` : html`<span></span>`}${s.mode === 'exam' && !s.review ? html`<button class="primary" @click=${ctx.next}>${s.index === s.ids.length - 1 ? 'Lämna in tentan' : 'Nästa fråga'} ${icon('ChevronRight')}</button>` : !feedback ? html`<button class="primary" @click=${ctx.check}>${q.self ? 'Visa modellösning' : 'Kontrollera svar'}${ctx.theme === 'sakura' ? html` <span class="kaomoji" aria-hidden="true">✨</span>` : ''} ${icon('Check')}</button>` : !q.self ? html`<button class="primary" @click=${ctx.next}>${s.index === s.ids.length - 1 ? 'Visa resultat' : 'Nästa fråga'}${ctx.theme === 'sakura' ? html` <span class="kaomoji" aria-hidden="true">🌸</span>` : ''} ${icon('ChevronRight')}</button>` : ''}
+          ${s.index > 0 ? html`<button class="secondary" @click=${() => ctx.jump(s.index - 1)}>Föregående</button>` : html`<span></span>`}${s.mode === 'exam' && !s.review ? html`<button class="primary" @click=${ctx.next}>${s.index === s.ids.length - 1 ? 'Lämna in tentan' : 'Nästa fråga'} ${icon('ChevronRight')}</button>` : !feedback ? html`<button class="primary" @click=${ctx.check}>${q.self ? 'Visa modellösning' : 'Kontrollera svar'}${ctx.theme === 'sakura' ? html` <span class="kaomoji" aria-hidden="true">✨</span>` : ''} ${icon('Check')}</button>` : !q.self ? html`<button class="primary" @click=${ctx.next}>${s.index === s.ids.length - 1 && (!s.loopErrors || !s.failedLoopIds?.length) ? 'Visa resultat' : s.loopErrors && s.index === s.ids.length - 1 ? 'Fortsätt repetition' : 'Nästa fråga'}${ctx.theme === 'sakura' ? html` <span class="kaomoji" aria-hidden="true">🌸</span>` : ''} ${icon('ChevronRight')}</button>` : ''}
         </div>
         ${s.mode === 'exam' ? html`<div class="question-jump">${s.ids.map((id, i) => html`<button class="${i === s.index ? 'current' : ''} ${s.answers[id] ? 'answered' : ''}" aria-label="Fråga ${i + 1}" aria-current=${i === s.index ? 'step' : 'false'} @click=${() => ctx.jump(i)}>${i + 1}</button>`)}</div>` : ''}
       </section>`,
