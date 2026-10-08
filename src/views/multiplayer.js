@@ -1,6 +1,7 @@
 import { html } from 'lit-html';
 import { icon, languageText } from './shared.js';
 import { playAnimeSound } from '../audio.js';
+import { db } from '../cloud.js';
 import {
   createLobby,
   joinLobby,
@@ -15,6 +16,11 @@ import {
   getActivePlayerUids,
   getPlayerMatchOutcome,
   getMultiplayerNow,
+  getMultiplayerClock,
+  isMultiplayerClockValid,
+  synchronizeMultiplayerClock,
+  invalidateMultiplayerClock,
+  updatePlayerClockStatus,
   getRoundDeadline,
   isRoundExpired,
   DEFAULT_ELO,
@@ -23,6 +29,8 @@ import {
   MAX_PLAYERS,
   MIN_PLAYERS,
   HEARTBEAT_TTL_MS,
+  MAX_CLOCK_UNCERTAINTY_MS,
+  MAX_CLOCK_AGE_MS,
 } from '../multiplayer.js';
 
 let activeLobbyId = null;
@@ -43,6 +51,9 @@ let activeUserUid = null;
 let unloadRegistered = false;
 let lobbyBusy = false;
 let viewEpoch = 0;
+let currentViewContext = null;
+let lifecycleRegistered = false;
+let lastTimerMonotonic = 0;
 let answerAttempt = null;
 
 export function resetMultiplayerView(uid = null) {
@@ -104,6 +115,30 @@ function watchLobby(ctx, code) {
 export function multiplayerView(ctx) {
   const { user } = ctx;
   activeUserUid = user?.uid || null;
+  currentViewContext = ctx;
+
+  if (!lifecycleRegistered && typeof window !== 'undefined') {
+    lifecycleRegistered = true;
+    const renewClock = async () => {
+      if (!activeUserUid) return;
+      const epoch = viewEpoch;
+      invalidateMultiplayerClock(db, 'lifecycle-event');
+      currentViewContext?.render?.();
+      try {
+        const clock = await synchronizeMultiplayerClock(db, activeUserUid, { force: true });
+        if (epoch === viewEpoch && activeLobbyId) {
+          await updatePlayerClockStatus(activeLobbyId, activeUserUid, clock);
+        }
+      } catch {}
+      if (epoch === viewEpoch) currentViewContext?.render?.();
+    };
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') renewClock();
+    });
+    window.addEventListener('pageshow', () => renewClock());
+    window.addEventListener('online', () => renewClock());
+  }
 
   // Initialize listeners if not yet active
   if (user && !openLobbiesUnsub) {
@@ -129,6 +164,30 @@ export function multiplayerView(ctx) {
   if (activeLobbyId && !timerInterval) {
     let advancing = false;
     timerInterval = setInterval(async () => {
+      const mNow = performance.now();
+      if (lastTimerMonotonic && mNow - lastTimerMonotonic > 3000) {
+        invalidateMultiplayerClock(db, 'monotonic-gap');
+        if (activeUserUid) {
+          synchronizeMultiplayerClock(db, activeUserUid, { force: true })
+            .then((clock) => {
+              if (activeLobbyId) updatePlayerClockStatus(activeLobbyId, activeUserUid, clock);
+              ctx.render?.();
+            })
+            .catch(() => {});
+        }
+      }
+      lastTimerMonotonic = mNow;
+
+      const clockSnapshot = getMultiplayerClock(db);
+      if (clockSnapshot.status === 'stale' && activeUserUid && !advancing) {
+        synchronizeMultiplayerClock(db, activeUserUid, { force: true })
+          .then((clock) => {
+            if (activeLobbyId) updatePlayerClockStatus(activeLobbyId, activeUserUid, clock);
+            ctx.render?.();
+          })
+          .catch(() => {});
+      }
+
       const game = currentLobbyData?.game;
       const now = getMultiplayerNow();
       if (
@@ -574,7 +633,9 @@ function waitingRoomView(ctx) {
         ? 'Vokabulär'
         : 'Ordföljd & Meningar';
 
-  const canStart = count >= MIN_PLAYERS;
+  const myClock = getMultiplayerClock(db);
+  const allReady = playersList.every((p) => p.ready !== false);
+  const canStart = count >= MIN_PLAYERS && allReady && myClock.valid;
 
   return html`
     <div class="multiplayer-container">
@@ -588,7 +649,9 @@ function waitingRoomView(ctx) {
             ${
               canStart
                 ? html`<span class="badge ready-tag">Redo att starta</span>`
-                : html`<span class="badge waiting-tag">Väntar på fler spelare...</span>`
+                : !allReady || !myClock.valid
+                  ? html`<span class="badge sync-tag">Omsynkroniserar…</span>`
+                  : html`<span class="badge waiting-tag">Väntar på fler spelare...</span>`
             }
           </div>
         </div>
@@ -597,6 +660,12 @@ function waitingRoomView(ctx) {
         <div class="waiting-players-grid">
           ${playersList.map((player) => {
             const playerIsHost = player.uid === currentLobbyData.host?.uid;
+            const isSyncing =
+              player.ready === false ||
+              player.clockStatus === 'syncing' ||
+              player.clockStatus === 'uncertain' ||
+              player.clockStatus === 'invalidated' ||
+              player.clockStatus === 'stale';
             return html`
               <div class="waiting-player-card ${player.uid === user.uid ? 'card-me' : ''}">
                 <div class="waiting-avatar-wrap">
@@ -611,7 +680,11 @@ function waitingRoomView(ctx) {
                 </div>
                 <strong class="waiting-name">${player.displayName}</strong>
                 <span class="badge elo-badge">${player.elo || DEFAULT_ELO} ELO</span>
-                <span class="waiting-role">${playerIsHost ? 'Värd' : 'Redo'}</span>
+                ${
+                  isSyncing
+                    ? html`<span class="waiting-role sync-role">Omsynkroniserar…</span>`
+                    : html`<span class="waiting-role">${playerIsHost ? 'Värd' : 'Redo'}</span>`
+                }
               </div>
             `;
           })}
@@ -624,6 +697,41 @@ function waitingRoomView(ctx) {
             `,
           )}
         </div>
+
+        ${
+          !myClock.valid
+            ? html`
+                <div class="clock-sync-card">
+                  <div class="clock-sync-info">
+                    <strong>${icon('Clock')} Klockan behöver synkroniseras</strong>
+                    <p>Matchklockan har för hög osäkerhet eller tappade kontakten med servern.</p>
+                  </div>
+                  <button
+                    class="secondary resync-btn"
+                    @click=${async () => {
+                      feedbackMessage = 'Synkroniserar matchklocka...';
+                      ctx.render();
+                      try {
+                        const clock = await synchronizeMultiplayerClock(db, user.uid, {
+                          force: true,
+                        });
+                        if (activeLobbyId) {
+                          await updatePlayerClockStatus(activeLobbyId, user.uid, clock);
+                        }
+                        feedbackMessage = '';
+                      } catch (err) {
+                        feedbackMessage = err.message || 'Kunde inte synkronisera';
+                      } finally {
+                        ctx.render();
+                      }
+                    }}
+                  >
+                    Synkronisera nu
+                  </button>
+                </div>
+              `
+            : ''
+        }
 
         <div class="waiting-actions">
           ${feedbackMessage ? html`<p class="feedback-msg" role="alert">${feedbackMessage}</p>` : ''}
@@ -697,6 +805,12 @@ function confirmAnswer(attempt, answer, ctx) {
 
 async function deliverAnswer(attempt, ctx) {
   if (!isCurrentAttempt(attempt)) return;
+  if (!isMultiplayerClockValid(db)) {
+    attempt.status = 'error';
+    attempt.message = 'Matchklockan är inte synkroniserad. Vänta på omsynkronisering.';
+    ctx.render();
+    return;
+  }
   attempt.status = 'sending';
   ctx.render();
   try {
@@ -793,10 +907,21 @@ function arenaView(ctx) {
     remainingSec = Math.max(0, Math.ceil((ROUND_TIME_MS - elapsed) / 1000));
   }
 
+  const myClock = getMultiplayerClock(db);
+
   return html`
     <div class="multiplayer-container arena-container">
       ${feedbackMessage ? html`<p class="feedback-msg" role="alert">${feedbackMessage}</p>` : ''}
       ${hasForfeited ? html`<p role="status">Du har lämnat matchen. Övriga spelare fortsätter.</p>` : ''}
+      ${
+        !myClock.valid
+          ? html`
+              <div class="arena-sync-banner">
+                ${icon('Clock')} Omsynkroniserar matchklockan… Svar är pausade.
+              </div>
+            `
+          : ''
+      }
 
       <!-- Arena Top Scoreboard -->
       <header class="arena-header card">
@@ -895,7 +1020,7 @@ function arenaView(ctx) {
                     <button
                       type="button"
                       class="choice-btn ${btnState}"
-                      ?disabled=${Boolean(attempt) || hasAnswered || hasForfeited || game.status !== 'playing' || isRoundExpired(game, now)}
+                      ?disabled=${Boolean(attempt) || hasAnswered || hasForfeited || game.status !== 'playing' || isRoundExpired(game, now) || !myClock.valid}
                       @click=${() => {
                         if (
                           answerAttempt ||
@@ -903,7 +1028,8 @@ function arenaView(ctx) {
                           hasForfeited ||
                           game.status !== 'playing' ||
                           isRoundExpired(game, getMultiplayerNow()) ||
-                          currentLobbyData?.game !== game
+                          currentLobbyData?.game !== game ||
+                          !isMultiplayerClockValid(db)
                         )
                           return;
                         answerAttempt = {

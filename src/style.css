@@ -4684,6 +4684,59 @@ html:not([data-theme='sakura']) .sound-slider,
   font-weight: 600;
   font-size: 11px;
 }
+.sync-tag {
+  background: #fef3e2;
+  color: #b45309;
+  font-weight: 700;
+  font-size: 11px;
+}
+.sync-role {
+  color: #b45309 !important;
+  font-style: italic;
+}
+.clock-sync-card {
+  margin: 16px 0;
+  padding: 14px 18px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  text-align: left;
+}
+.clock-sync-info strong {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #92400e;
+  font-size: 14px;
+}
+.clock-sync-info p {
+  margin: 4px 0 0 0;
+  color: #78350f;
+  font-size: 13px;
+}
+.resync-btn {
+  white-space: nowrap;
+  font-size: 13px;
+  padding: 8px 14px;
+  border-radius: 8px;
+}
+.arena-sync-banner {
+  margin: 8px 0;
+  padding: 8px 12px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  color: #92400e;
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
 
 /* Dynamic 10-Player Grid */
 .waiting-players-grid {

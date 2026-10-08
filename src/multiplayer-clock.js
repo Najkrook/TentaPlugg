@@ -175,8 +175,8 @@ export async function synchronizeMultiplayerClock(database, uid, { force = false
   const state = getClockState(database);
   const mNow = timeSource.monotonic();
 
-  // If already syncing, coordinate overlapping attempts
-  if (state.activePromise) {
+  // If already syncing and not forced, coordinate overlapping attempts
+  if (!force && state.activePromise) {
     return state.activePromise;
   }
 

@@ -48,13 +48,13 @@ async function create(page) {
   return (await page.locator('.room-code-tag').textContent()).trim();
 }
 
-async function join(page, code) {
+async function join(page, code, options = {}) {
   await page.locator('.code-input').fill(code);
   await page
     .locator('.join-code-card')
     .getByRole('button', { name: 'Gå med', exact: true })
     .click();
-  await expect(page.locator('.room-code-tag')).toHaveText(code);
+  await expect(page.locator('.room-code-tag')).toHaveText(code, options);
 }
 
 test('skewed device clocks preserve countdown, answer window and automatic round progression', async ({
@@ -573,6 +573,91 @@ test('late delivery result cannot lock the next round or a reset view', async ({
     await expect(page.locator('.answer-delivery-status')).toHaveCount(0);
   } finally {
     await page.unrouteAll({ behavior: 'wait' });
+    await guest.close();
+  }
+});
+
+test('client with 6s delayed clock samples shows resync banner and retry, and becomes ready only when quality restored', async ({
+  page,
+  browser,
+}) => {
+  const guest = await browser.newPage();
+  try {
+    await login(page);
+    await login(guest);
+    const code = await create(page);
+
+    // Inject 6-second delay on clock sample commit receipt for guest
+    let delayClock = true;
+    await guest.route('**', async (route) => {
+      const url = route.request().url().toLowerCase();
+      const data = (route.request().postData() || '').toLowerCase();
+      if (
+        delayClock &&
+        data.includes('multiplayerclock') &&
+        url.includes('commit') &&
+        !data.includes('delete')
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 6000));
+      }
+      await route.continue();
+    });
+
+    await join(guest, code, { timeout: 35000 });
+
+    // Guest should show clock synchronization banner and uncertain/syncing status
+    await expect(guest.locator('.clock-sync-card')).toBeVisible();
+    await expect(guest.locator('.sync-role')).toHaveText('Omsynkroniserar…');
+
+    // Host sees guest as not ready; start button is disabled
+    await expect(page.locator('.sync-role')).toHaveText('Omsynkroniserar…');
+    await expect(page.locator('.start-btn')).toBeDisabled();
+
+    // Now restore connection quality for guest and retry
+    delayClock = false;
+    await guest.unrouteAll({ behavior: 'wait' });
+    await guest.locator('.resync-btn').click();
+
+    // Guest is now ready!
+    await expect(guest.locator('.clock-sync-card')).toHaveCount(0);
+    await expect(guest.locator('.waiting-role').filter({ hasText: 'Redo' })).toBeVisible();
+
+    // Host sees guest as Redo and start button is enabled
+    await expect(page.locator('.start-btn')).toBeEnabled();
+
+    // Host starts match; game begins normally
+    await page.locator('.start-btn').click();
+    await expect(page.locator('.arena-countdown-overlay')).toBeVisible();
+    await expect(guest.locator('.arena-countdown-overlay')).toBeVisible();
+  } finally {
+    await guest.unrouteAll({ behavior: 'wait' });
+    await guest.close();
+  }
+});
+
+test('tab visibility return renews clock calibration', async ({ page, browser }) => {
+  const guest = await browser.newPage();
+  try {
+    await login(page);
+    await login(guest);
+    const code = await create(page);
+    await join(guest, code);
+
+    // Guest simulates tab hidden then visible
+    await guest.evaluate(() => {
+      Object.defineProperty(document, 'visibilityState', { value: 'hidden', writable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+
+    await guest.evaluate(() => {
+      Object.defineProperty(document, 'visibilityState', { value: 'visible', writable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+
+    // Verification that guest re-calibrates and is visible and ready
+    await expect(guest.locator('.waiting-role').filter({ hasText: 'Redo' })).toBeVisible();
+    await expect(page.locator('.start-btn')).toBeEnabled();
+  } finally {
     await guest.close();
   }
 });

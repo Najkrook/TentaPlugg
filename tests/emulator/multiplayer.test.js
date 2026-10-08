@@ -231,3 +231,59 @@ test('two-player forfeit still immediately awards the remaining player a win', a
   assert.equal((await m.profile(1)).elo, 1216);
   assert.equal((await m.profile(1)).wins, 1);
 });
+
+test('clock quality enforcement blocks uncalibrated or invalidated matches and answers', async () => {
+  const prefix = `arena-clock-${++sequence}`;
+  const users = [
+    { uid: `${prefix}-0`, displayName: 'Host' },
+    { uid: `${prefix}-1`, displayName: 'Guest' },
+  ];
+  const databases = users.map((u) => env.authenticatedContext(u.uid).firestore());
+  async function as(index, action) {
+    useDatabase(databases[index]);
+    return action();
+  }
+
+  // Calibration establishes valid clock on create and join
+  const code = await as(0, () => mp.createLobby(users[0], 'particles'));
+  await as(1, () => mp.joinLobby(code, users[1]));
+
+  const lobbyInitial = (await getDoc(doc(databases[0], 'lobbies', code))).data();
+  assert.equal(lobbyInitial.players[users[0].uid].ready, true);
+  assert.equal(lobbyInitial.players[users[1].uid].ready, true);
+  assert.equal(lobbyInitial.players[users[0].uid].clockStatus, 'synced');
+
+  // Simulated monotonic pause or invalidation on host
+  await as(0, () => mp.simulateMonotonicPause(databases[0]));
+  assert.equal(await as(0, () => mp.isMultiplayerClockValid(databases[0])), false);
+
+  // Attempting to start match while clock is invalid is rejected
+  await assert.rejects(
+    () => as(0, () => mp.startMatch(code)),
+    /matchklockan är inte synkroniserad/,
+  );
+
+  // Recalibrating host restores validity and allows match start
+  await as(0, () => mp.synchronizeMultiplayerClock(databases[0], users[0].uid, { force: true }));
+  assert.equal(await as(0, () => mp.isMultiplayerClockValid(databases[0])), true);
+  await as(0, () => mp.startMatch(code));
+
+  // Match started
+  const game = (await getDoc(doc(databases[0], 'lobbies', code))).data().game;
+  assert.equal(game.status, 'playing');
+
+  // Guest clock invalidation blocks answer submission
+  await as(1, () => mp.simulateMonotonicPause(databases[1]));
+  const rejectedReceipt = await as(1, () =>
+    mp.submitPlayerAnswer(code, users[1].uid, 0, game.questions[0].correctAnswer),
+  );
+  assert.equal(rejectedReceipt.status, 'rejected');
+
+  // Recalibrating guest allows timely answer submission
+  await as(1, () => mp.synchronizeMultiplayerClock(databases[1], users[1].uid, { force: true }));
+  await updateDoc(doc(databases[0], 'lobbies', code), { 'game.roundStartTime': Date.now() - 100 });
+  const acceptedReceipt = await as(1, () =>
+    mp.submitPlayerAnswer(code, users[1].uid, 0, game.questions[0].correctAnswer),
+  );
+  assert.equal(acceptedReceipt.status, 'accepted');
+});
