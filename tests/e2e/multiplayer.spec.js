@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import path from 'node:path';
+import os from 'node:os';
 
 test.skip(!process.env.FIRESTORE_EMULATOR_HOST, 'Requires isolated Firebase emulators');
 test.setTimeout(90000);
@@ -657,6 +658,113 @@ test('tab visibility return renews clock calibration', async ({ page, browser })
     // Verification that guest re-calibrates and is visible and ready
     await expect(guest.locator('.waiting-role').filter({ hasText: 'Redo' })).toBeVisible();
     await expect(page.locator('.start-btn')).toBeEnabled();
+  } finally {
+    await guest.close();
+  }
+});
+
+// Move only the server-stamped presence fixture; production expiry and forfeit
+// operations still run against the emulator with the real security rules.
+async function expirePresence(request, code, uid) {
+  const host = process.env.FIRESTORE_EMULATOR_HOST;
+  const response = await request.patch(
+    `http://${host}/v1/projects/demo-tentaplugg/databases/(default)/documents/lobbies/${code}/presence/${uid}?updateMask.fieldPaths=seenAt`,
+    {
+      headers: { Authorization: 'Bearer owner' },
+      data: { fields: { seenAt: { timestampValue: new Date(Date.now() - 46000).toISOString() } } },
+    },
+  );
+  expect(response.ok()).toBeTruthy();
+}
+
+test('presence: abrupt guest closure removes readiness and prevents a solo start', async ({
+  page,
+  browser,
+  request,
+}, testInfo) => {
+  const guest = await browser.newPage();
+  const errors = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  try {
+    await login(page);
+    const uid = await login(guest);
+    const code = await create(page);
+    await join(guest, code);
+    await expect(page.getByRole('button', { name: 'Starta matchen!' })).toBeEnabled();
+    await guest.close();
+    expect((await read(page, 'lobbies', code)).players[uid]).toBeTruthy();
+    await expirePresence(request, code, uid);
+    await expect(page.locator('.waiting-counter-badge')).toContainText('1 / 10');
+    await expect(page.locator('.waiting-role').filter({ hasText: 'Frånkopplad' })).toHaveCount(1);
+    await expect(page.getByRole('button', { name: 'Starta matchen!' })).toBeDisabled();
+    await expect(page.locator('vite-error-overlay')).toHaveCount(0);
+    expect(await page.title()).toMatch(/TentaPlugg/i);
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.screenshot({
+      path: path.join(os.tmpdir(), `tentaplugg-presence-${testInfo.project.name}.png`),
+    });
+    expect(errors).toEqual([]);
+  } finally {
+    if (!guest.isClosed()) await guest.close();
+  }
+});
+
+test('presence: interrupted match keeps its deadline, then forfeits the absent player once', async ({
+  page,
+  browser,
+  request,
+}) => {
+  const guest = await browser.newPage();
+  try {
+    const hostUid = await login(page);
+    const uid = await login(guest);
+    const code = await create(page);
+    await join(guest, code);
+    await page.getByRole('button', { name: 'Starta matchen!' }).click();
+    await expect(guest.locator('.round-badge')).toBeVisible();
+    const before = await read(page, 'lobbies', code);
+    // Known local network loss is shown immediately; short recovery is not a forfeit.
+    await guest.context().setOffline(true);
+    await expect(guest.getByRole('status').filter({ hasText: 'Återanslut inom' })).toBeVisible();
+    await guest.context().setOffline(false);
+    await expect(guest.getByRole('status').filter({ hasText: 'Återanslut inom' })).toHaveCount(0);
+    expect((await read(page, 'lobbies', code)).game.roundStartTime).toBe(
+      before.game.roundStartTime,
+    );
+    await guest.close();
+    expect((await read(page, 'lobbies', code)).status).toBe('playing');
+    await expirePresence(request, code, uid);
+    await expect(page.locator('.result-card h1')).toContainText('Seger');
+    expect(await read(page, 'leaderboard', uid)).toMatchObject({ losses: 1, matchesPlayed: 1 });
+    expect(await read(page, 'leaderboard', hostUid)).toMatchObject({ wins: 1, matchesPlayed: 1 });
+  } finally {
+    if (!guest.isClosed()) await guest.close();
+  }
+});
+
+test('presence: stale host closes the waiting view without unregistering a newer guest session', async ({
+  page,
+  browser,
+  request,
+}) => {
+  const guest = await browser.newPage();
+  try {
+    const hostUid = await login(page);
+    const uid = await login(guest);
+    const code = await create(page);
+    await join(guest, code);
+    await guest.evaluate(
+      async ({ code, uid }) => {
+        const { connectPlayerPresence } = await import('/src/multiplayer.js');
+        await connectPlayerPresence(code, uid);
+      },
+      { code, uid },
+    );
+    await page.close();
+    await expirePresence(request, code, hostUid);
+    await expect(guest.locator('.room-code-tag')).toHaveCount(0);
+    await expect(guest.locator('.feedback-msg')).toContainText('Värden är inte längre ansluten');
+    expect((await read(guest, 'lobbies', code)).players[uid]).toBeTruthy();
   } finally {
     await guest.close();
   }

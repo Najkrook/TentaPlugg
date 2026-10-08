@@ -98,6 +98,29 @@ service cloud.firestore {
       allow delete: if request.auth != null
         && resource.data.host.uid == request.auth.uid;
 
+      match /presence/{userId} {
+        allow read: if request.auth != null;
+        allow create, update: if request.auth != null && request.auth.uid == userId
+          && request.resource.data.keys().hasOnly(['uid', 'sessionId', 'seenAt'])
+          && request.resource.data.uid == userId
+          && request.resource.data.sessionId is string
+          && request.resource.data.sessionId.size() > 0
+          && request.resource.data.sessionId.size() <= 128
+          && request.resource.data.seenAt == request.time
+          && presenceAllowed();
+
+        function presenceAllowed() {
+          let lobby = get(/databases/$(database)/documents/lobbies/$(lobbyId)).data;
+          return userId in lobby.players && (
+            lobby.status == 'waiting' || (
+              lobby.status != 'finished'
+              && !(userId in lobby.game.get('forfeitedUids', []))
+              && request.time < resource.data.seenAt + duration.value(45, 's')
+            )
+          );
+        }
+      }
+
       match /answers/{answerId} {
         allow read: if request.auth != null;
         allow create, update: if request.auth != null

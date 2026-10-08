@@ -10,6 +10,8 @@ import {
   submitAnswer,
   advanceRoundIfDue,
   sendHeartbeat,
+  isPlayerPresent,
+  expireDisconnectedPlayers,
   subscribeToLobby,
   subscribeToOpenLobbies,
   subscribeToLeaderboard,
@@ -28,7 +30,6 @@ import {
   TIMEOUT_PENALTY,
   MAX_PLAYERS,
   MIN_PLAYERS,
-  HEARTBEAT_TTL_MS,
   MAX_CLOCK_UNCERTAINTY_MS,
   MAX_CLOCK_AGE_MS,
 } from '../multiplayer.js';
@@ -48,7 +49,7 @@ let activeTab = 'lobbies'; // 'lobbies' | 'leaderboard'
 let hasCelebrated = false;
 let feedbackMessage = '';
 let activeUserUid = null;
-let unloadRegistered = false;
+let locallyOffline = typeof navigator !== 'undefined' && navigator.onLine === false;
 let lobbyBusy = false;
 let viewEpoch = 0;
 let currentViewContext = null;
@@ -137,7 +138,16 @@ export function multiplayerView(ctx) {
       if (document.visibilityState === 'visible') renewClock();
     });
     window.addEventListener('pageshow', () => renewClock());
-    window.addEventListener('online', () => renewClock());
+    window.addEventListener('online', async () => {
+      locallyOffline = false;
+      await renewClock();
+      if (activeLobbyId) sendHeartbeat(activeLobbyId, activeUserUid).catch(() => {});
+    });
+    window.addEventListener('offline', () => {
+      locallyOffline = true;
+      invalidateMultiplayerClock(db, 'offline');
+      currentViewContext?.render?.();
+    });
   }
 
   // Initialize listeners if not yet active
@@ -163,6 +173,8 @@ export function multiplayerView(ctx) {
   // Timer loop for arena round checks & timeouts (runs every 250ms for smooth progress bar)
   if (activeLobbyId && !timerInterval) {
     let advancing = false;
+    let checkingPresence = false;
+    let lastPresenceCheck = 0;
     timerInterval = setInterval(async () => {
       const mNow = performance.now();
       if (lastTimerMonotonic && mNow - lastTimerMonotonic > 3000) {
@@ -193,13 +205,37 @@ export function multiplayerView(ctx) {
       if (
         currentLobbyData?.status === 'waiting' &&
         currentLobbyData.host?.uid !== activeUserUid &&
-        now - (currentLobbyData.heartbeat || currentLobbyData.createdAt || 0) >= HEARTBEAT_TTL_MS
+        clockSnapshot.valid &&
+        !isPlayerPresent(
+          currentLobbyData,
+          currentLobbyData.host.uid,
+          now - clockSnapshot.uncertainty,
+        )
       ) {
-        resetMultiplayerView(activeUserUid);
+        resetMultiplayerView();
         feedbackMessage = 'Värden är inte längre ansluten. Välj en annan lobby.';
         ctx.render?.();
         return;
       }
+      if (
+        game &&
+        game.status !== 'finished' &&
+        clockSnapshot.valid &&
+        getActivePlayerUids(game).some(
+          (uid) => !isPlayerPresent(currentLobbyData, uid, now - clockSnapshot.uncertainty),
+        ) &&
+        !checkingPresence &&
+        now - lastPresenceCheck >= 1000
+      ) {
+        checkingPresence = true;
+        lastPresenceCheck = now;
+        expireDisconnectedPlayers(activeLobbyId)
+          .catch(() => {})
+          .finally(() => {
+            checkingPresence = false;
+          });
+      }
+      ctx.render?.();
       if (!game || game.status === 'finished') return;
 
       const isHost = currentLobbyData.host?.uid === activeUserUid;
@@ -222,35 +258,19 @@ export function multiplayerView(ctx) {
           advancing = false;
         }
       }
-      ctx.render?.();
     }, 250);
   }
 
-  // Heartbeat loop for keeping waiting lobby alive
-  if (
-    activeLobbyId &&
-    currentLobbyData?.status === 'waiting' &&
-    currentLobbyData.host?.uid === activeUserUid &&
-    !heartbeatInterval
-  ) {
+  // Every participant renews an independent presence document, including in play.
+  // Closing/reloading a tab deliberately does not register a forfeit.
+  if (activeLobbyId && currentLobbyData?.status !== 'finished' && !heartbeatInterval) {
     heartbeatInterval = setInterval(() => {
-      if (activeLobbyId && currentLobbyData?.status === 'waiting') {
-        sendHeartbeat(activeLobbyId, activeUserUid);
-      }
+      if (activeLobbyId && !locallyOffline)
+        sendHeartbeat(activeLobbyId, activeUserUid).catch(() => {});
     }, 10000);
-  } else if ((!activeLobbyId || currentLobbyData?.status !== 'waiting') && heartbeatInterval) {
+  } else if ((!activeLobbyId || currentLobbyData?.status === 'finished') && heartbeatInterval) {
     clearInterval(heartbeatInterval);
     heartbeatInterval = null;
-  }
-
-  // Register page unload cleanup
-  if (typeof window !== 'undefined' && !unloadRegistered) {
-    unloadRegistered = true;
-    window.addEventListener('beforeunload', () => {
-      if (activeLobbyId && activeUserUid) {
-        leaveLobby(activeLobbyId, activeUserUid);
-      }
-    });
   }
 
   if (!user) {
@@ -440,7 +460,6 @@ function lobbyBrowserView(ctx) {
                         try {
                           const code = await createLobby(user, selectedCategory);
                           if (epoch !== viewEpoch) {
-                            await leaveLobby(code, user.uid);
                             return;
                           }
                           activeLobbyId = code;
@@ -511,9 +530,9 @@ function lobbyBrowserView(ctx) {
                                       ? 'Vokabulär'
                                       : 'Ordföljd';
                                 const count =
-                                  lobby.playerCount ||
-                                  Object.keys(lobby.players || {}).length ||
-                                  (lobby.guest ? 2 : 1);
+                                  lobby.readyCount ??
+                                  lobby.playerCount ??
+                                  Object.keys(lobby.players || {}).length;
                                 return html`
                                   <li class="lobby-item">
                                     <div class="lobby-info">
@@ -592,7 +611,6 @@ async function joinSelectedLobby(ctx, lobbyId) {
   try {
     const joined = await joinLobby(lobbyId, ctx.user);
     if (epoch !== viewEpoch) {
-      await leaveLobby(lobbyId, ctx.user.uid);
       return;
     }
     activeLobbyId = lobbyId;
@@ -624,7 +642,10 @@ function waitingRoomView(ctx) {
       : {}),
   };
   const playersList = Object.values(playersMap);
-  const count = playersList.length;
+  const present = (uid) =>
+    isPlayerPresent(currentLobbyData, uid) && !(uid === user.uid && locallyOffline);
+  const connectedPlayers = playersList.filter((p) => present(p.uid));
+  const count = connectedPlayers.filter((p) => p.ready !== false).length;
 
   const categoryLabel =
     currentLobbyData.category === 'particles'
@@ -634,8 +655,9 @@ function waitingRoomView(ctx) {
         : 'Ordföljd & Meningar';
 
   const myClock = getMultiplayerClock(db);
-  const allReady = playersList.every((p) => p.ready !== false);
-  const canStart = count >= MIN_PLAYERS && allReady && myClock.valid;
+  const allReady = connectedPlayers.every((p) => p.ready !== false);
+  const canStart =
+    count >= MIN_PLAYERS && allReady && myClock.valid && present(currentLobbyData.host.uid);
 
   return html`
     <div class="multiplayer-container">
@@ -645,7 +667,7 @@ function waitingRoomView(ctx) {
           <h2>Rumskod: <span class="room-code-tag">${currentLobbyData.id}</span></h2>
           <p class="waiting-sub">Dela koden med kursare för att starta matchen tillsammans!</p>
           <div class="waiting-counter-badge">
-            ${icon('Users')} <strong>${count} / ${MAX_PLAYERS}</strong> anslutna
+            ${icon('Users')} <strong>${count} / ${MAX_PLAYERS}</strong> redo
             ${
               canStart
                 ? html`<span class="badge ready-tag">Redo att starta</span>`
@@ -681,14 +703,16 @@ function waitingRoomView(ctx) {
                 <strong class="waiting-name">${player.displayName}</strong>
                 <span class="badge elo-badge">${player.elo || DEFAULT_ELO} ELO</span>
                 ${
-                  isSyncing
-                    ? html`<span class="waiting-role sync-role">Omsynkroniserar…</span>`
-                    : html`<span class="waiting-role">${playerIsHost ? 'Värd' : 'Redo'}</span>`
+                  !present(player.uid)
+                    ? html`<span class="waiting-role">Frånkopplad</span>`
+                    : isSyncing
+                      ? html`<span class="waiting-role sync-role">Omsynkroniserar…</span>`
+                      : html`<span class="waiting-role">${playerIsHost ? 'Värd' : 'Redo'}</span>`
                 }
               </div>
             `;
           })}
-          ${Array.from({ length: Math.max(0, MAX_PLAYERS - count) }).map(
+          ${Array.from({ length: Math.max(0, MAX_PLAYERS - playersList.length) }).map(
             () => html`
               <div class="waiting-slot-empty">
                 <div class="empty-plus-icon">${icon('UserPlus')}</div>
@@ -911,6 +935,15 @@ function arenaView(ctx) {
 
   return html`
     <div class="multiplayer-container arena-container">
+      ${locallyOffline ? html`<p role="status">Frånkopplad. Återanslut inom 45 sekunder; rundans tid fortsätter.</p>` : ''}
+      ${getActivePlayerUids(currentLobbyData.game)
+        .filter((uid) => !isPlayerPresent(currentLobbyData, uid))
+        .map(
+          (uid) =>
+            html`<p role="status">
+              ${currentLobbyData.players?.[uid]?.displayName || 'Spelare'} är frånkopplad.
+            </p>`,
+        )}
       ${feedbackMessage ? html`<p class="feedback-msg" role="alert">${feedbackMessage}</p>` : ''}
       ${hasForfeited ? html`<p role="status">Du har lämnat matchen. Övriga spelare fortsätter.</p>` : ''}
       ${

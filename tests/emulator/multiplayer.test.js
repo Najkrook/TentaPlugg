@@ -2,8 +2,8 @@ import { before, after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { registerHooks } from 'node:module';
-import { initializeTestEnvironment } from '@firebase/rules-unit-testing';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { initializeTestEnvironment, assertFails } from '@firebase/rules-unit-testing';
+import { doc, getDoc, updateDoc, setDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
 import { useDatabase } from './multiplayer-db.js';
 
 const hooks = registerHooks({
@@ -286,4 +286,101 @@ test('clock quality enforcement blocks uncalibrated or invalidated matches and a
     mp.submitPlayerAnswer(code, users[1].uid, 0, game.questions[0].correctAnswer),
   );
   assert.equal(acceptedReceipt.status, 'accepted');
+});
+
+async function agePresence(m, index, age) {
+  await env.withSecurityRulesDisabled(async (context) => {
+    await updateDoc(doc(context.firestore(), 'lobbies', m.code, 'presence', m.users[index].uid), {
+      seenAt: Timestamp.fromMillis(Date.now() - age),
+    });
+  });
+}
+
+test('presence boundary is exclusive at 45 seconds', () => {
+  const lobby = { presenceVersion: 1, presence: { p: { seenAt: Timestamp.fromMillis(1000) } } };
+  assert.equal(mp.isPlayerPresent(lobby, 'p', 45999), true);
+  assert.equal(mp.isPlayerPresent(lobby, 'p', 46000), false);
+  assert.equal(mp.isPlayerPresent(lobby, 'missing', 1000), false);
+});
+
+test('presence uses server timestamps and ownership rules; heartbeats leave lobby untouched', async () => {
+  const m = await match(2);
+  const before = await m.read();
+  await m.as(1, () => mp.sendHeartbeat(m.code, m.users[1].uid));
+  assert.deepEqual(await m.read(), before);
+  const guestDb = env.authenticatedContext(m.users[1].uid).firestore();
+  const ref = doc(guestDb, 'lobbies', m.code, 'presence', m.users[1].uid);
+  const saved = (await getDoc(ref)).data();
+  assert(saved.seenAt instanceof Timestamp);
+  await assertFails(updateDoc(ref, { seenAt: Timestamp.fromMillis(Date.now() + 60000) }));
+  await assertFails(
+    setDoc(doc(guestDb, 'lobbies', m.code, 'presence', m.users[0].uid), {
+      uid: m.users[0].uid,
+      sessionId: 'stolen',
+      seenAt: serverTimestamp(),
+    }),
+  );
+});
+
+test('short interruption renews session without resetting round; old session cannot renew', async () => {
+  const m = await match(3);
+  const old = await m.as(1, () => mp.connectPlayerPresence(m.code, m.users[1].uid));
+  const before = await m.read();
+  await agePresence(m, 1, 30000);
+  const current = await m.as(1, () => mp.connectPlayerPresence(m.code, m.users[1].uid));
+  assert.notEqual(old, current);
+  assert.equal(await m.as(1, () => mp.sendHeartbeat(m.code, m.users[1].uid, old)), false);
+  await m.as(0, () => mp.expireDisconnectedPlayers(m.code));
+  assert.deepEqual(await m.read(), before);
+  assert.equal(await m.as(1, () => mp.sendHeartbeat(m.code, m.users[1].uid, current)), true);
+});
+
+test('concurrent expiry forfeits once, continues with two and finishes with one', async () => {
+  const m = await match(3);
+  const before = await m.read();
+  await agePresence(m, 2, 46000);
+  await assert.rejects(() => m.as(2, () => mp.sendHeartbeat(m.code, m.users[2].uid)));
+  await m.as(0, () =>
+    Promise.all([mp.expireDisconnectedPlayers(m.code), mp.expireDisconnectedPlayers(m.code)]),
+  );
+  const continuing = await m.read();
+  assert.equal(continuing.status, 'playing');
+  assert.deepEqual(continuing.game.forfeitedUids, [m.users[2].uid]);
+  assert.equal(continuing.game.roundStartTime, before.game.roundStartTime);
+  assert.equal(continuing.game.scores[m.users[2].uid], -9999);
+  await agePresence(m, 1, 46000);
+  await m.as(0, () =>
+    Promise.all([mp.expireDisconnectedPlayers(m.code), mp.expireDisconnectedPlayers(m.code)]),
+  );
+  const finished = await m.read();
+  assert.equal(finished.status, 'finished');
+  for (let i = 0; i < 3; i++) assert.equal((await m.profile(i)).matchesPlayed, 1);
+  assert.equal((await m.profile(0)).wins, 1);
+  assert.equal((await m.profile(2)).losses, 1);
+  await m.as(2, () => mp.connectPlayerPresence(m.code, m.users[2].uid));
+  await assert.rejects(() => m.as(2, () => mp.sendHeartbeat(m.code, m.users[2].uid)));
+  await m.as(0, () => mp.expireDisconnectedPlayers(m.code));
+  assert.deepEqual(await m.read(), finished);
+});
+
+test('expired waiting guest cannot satisfy start requirement; expired host rejects joins', async () => {
+  const m = await match(2);
+  await m.update({ status: 'waiting', game: null });
+  await agePresence(m, 1, 46000);
+  await assert.rejects(() => m.as(0, () => mp.startMatch(m.code)), /minst en till/);
+  await m.as(1, () => mp.connectPlayerPresence(m.code, m.users[1].uid));
+  await agePresence(m, 0, 46000);
+  await assert.rejects(() => m.as(1, () => mp.joinLobby(m.code, m.users[1])), /inte längre aktiv/);
+});
+
+test('a stale waiting guest is excluded when two present players start', async () => {
+  const m = await match(3);
+  await m.update({ status: 'waiting', game: null });
+  await agePresence(m, 1, 46000);
+  await m.as(0, () => mp.startMatch(m.code));
+  const lobby = await m.read();
+  assert.deepEqual(lobby.game.playerUids.sort(), [m.users[0].uid, m.users[2].uid].sort());
+  assert.equal(lobby.game.guestUid, m.users[2].uid);
+  assert.equal(lobby.guest.uid, m.users[2].uid);
+  assert.equal(lobby.playerCount, 2);
 });

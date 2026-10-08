@@ -8,6 +8,8 @@ import {
   orderBy,
   limit,
   runTransaction,
+  serverTimestamp,
+  getDocFromServer,
 } from 'firebase/firestore';
 import { db } from './cloud.js';
 import {
@@ -48,6 +50,88 @@ export const IDLE_ROUND_TIME_MS = 60000;
 
 export function getMultiplayerNow() {
   return multiplayerNow(db);
+}
+
+// One current connection per participant. Old tabs may observe, but cannot renew it.
+const presenceSessions = new WeakMap();
+function sessions(database) {
+  if (!presenceSessions.has(database)) presenceSessions.set(database, new Map());
+  return presenceSessions.get(database);
+}
+export function isPlayerPresent(lobby, uid, now = getMultiplayerNow()) {
+  if (!lobby.presenceVersion)
+    return now - (lobby.heartbeat || lobby.createdAt || 0) < HEARTBEAT_TTL_MS;
+  const presence = lobby.presence?.[uid];
+  return Boolean(presence?.seenAt && now - presence.seenAt.toMillis() < HEARTBEAT_TTL_MS);
+}
+
+export async function connectPlayerPresence(lobbyId, uid) {
+  const database = db;
+  const sessionId = crypto.randomUUID();
+  const ref = doc(database, 'lobbies', lobbyId, 'presence', uid);
+  const connected = await runTransaction(database, async (tx) => {
+    const lobby = (await tx.get(doc(database, 'lobbies', lobbyId))).data();
+    const previous = await tx.get(ref);
+    if (
+      !lobby?.players?.[uid] ||
+      lobby.status === 'finished' ||
+      lobby.game?.forfeitedUids?.includes(uid)
+    )
+      return;
+    if (
+      lobby.status !== 'waiting' &&
+      (!previous.exists() ||
+        getMultiplayerNow() - previous.data().seenAt.toMillis() >= HEARTBEAT_TTL_MS)
+    )
+      return;
+    tx.set(ref, { uid, sessionId, seenAt: serverTimestamp() });
+    return true;
+  });
+  if (!connected) return null;
+  sessions(database).set(`${lobbyId}/${uid}`, sessionId);
+  return sessionId;
+}
+
+// Read the presence documents in the same transaction as start/forfeit, so a
+// renewal racing expiry forces a retry before any score or rating can change.
+async function readPresence(tx, database, lobbyId, data) {
+  const uids = Object.keys(data.players || {});
+  const snapshots = await Promise.all(
+    uids.map((uid) => tx.get(doc(database, 'lobbies', lobbyId, 'presence', uid))),
+  );
+  return Object.fromEntries(uids.map((uid, i) => [uid, snapshots[i].data()]));
+}
+
+export async function expireDisconnectedPlayers(lobbyId) {
+  const database = db;
+  if (!isMultiplayerClockValid(database)) return;
+  const ref = doc(database, 'lobbies', lobbyId);
+  // Each forfeit is its own atomic transition; each retry rechecks membership,
+  // presence and finished state. All callers can safely help after host loss.
+  for (let i = 0; i < MAX_PLAYERS; i++) {
+    const changed = await runTransaction(database, async (tx) => {
+      const snap = await tx.get(ref);
+      const data = snap.data();
+      if (!data?.presenceVersion || !data.game || data.game.status === 'finished') return false;
+      const presence = await readPresence(tx, database, lobbyId, data);
+      const clock = getMultiplayerClock(database);
+      if (!clock.valid) return false;
+      const expired = getActivePlayerUids(data.game).find(
+        (uid) => !isPlayerPresent({ ...data, presence }, uid, clock.now - clock.uncertainty),
+      );
+      if (!expired) return false;
+      await applyForfeitInTransaction(tx, ref, data, expired, clock.now);
+      return true;
+    }).catch(async (error) => {
+      // Firestore may evaluate the exactly-once rating rule before reporting a
+      // competing commit as a transaction conflict. Reconcile its durable result.
+      if (error.code !== 'permission-denied') throw error;
+      const latest = await getDocFromServer(ref);
+      if (latest.data()?.game?.status === 'finished') return false;
+      throw error;
+    });
+    if (!changed) break;
+  }
 }
 
 export function getRoundDeadline(game) {
@@ -716,6 +800,7 @@ export async function createLobby(user, category) {
   const now = getMultiplayerNow();
   const lobbyData = {
     id: code,
+    presenceVersion: 1,
     category,
     status: 'waiting',
     createdAt: now,
@@ -745,23 +830,27 @@ export async function createLobby(user, category) {
   };
 
   await setDoc(lobbyRef, lobbyData);
+  await connectPlayerPresence(code, user.uid);
   return code;
 }
 
 /**
- * Sends a heartbeat for a lobby to keep it active in the open lobby list.
+ * Renews only the current participant connection, without rewriting the lobby.
  */
-export async function sendHeartbeat(lobbyId, uid) {
-  if (!lobbyId || !uid) return;
-  try {
-    const lobbyRef = doc(db, 'lobbies', lobbyId);
-    await runTransaction(db, async (tx) => {
-      const snap = await tx.get(lobbyRef);
-      if (snap.exists() && snap.data().status === 'waiting' && snap.data().host?.uid === uid) {
-        tx.update(lobbyRef, { heartbeat: getMultiplayerNow(), updatedAt: getMultiplayerNow() });
-      }
-    });
-  } catch {}
+export async function sendHeartbeat(
+  lobbyId,
+  uid,
+  sessionId = sessions(db).get(`${lobbyId}/${uid}`),
+) {
+  if (!lobbyId || !uid || !sessionId) return false;
+  const database = db;
+  const ref = doc(database, 'lobbies', lobbyId, 'presence', uid);
+  return runTransaction(database, async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists() || snap.data().sessionId !== sessionId) return false;
+    tx.update(ref, { seenAt: serverTimestamp() });
+    return true;
+  });
 }
 
 /**
@@ -801,12 +890,13 @@ export async function joinLobby(lobbyId, user) {
   const profile = await ensureLeaderboardProfile(user);
   const guestElo = profile.elo;
 
-  return runTransaction(db, async (tx) => {
+  const joined = await runTransaction(db, async (tx) => {
     const snap = await tx.get(lobbyRef);
     if (!snap.exists()) throw new Error('Lobbyn hittades inte');
     const data = snap.data();
     if (data.status !== 'waiting') throw new Error('Matchen har redan startat');
-    if (getMultiplayerNow() - (data.heartbeat || data.createdAt || 0) >= HEARTBEAT_TTL_MS)
+    const presence = await readPresence(tx, db, cleanId, data);
+    if (!isPlayerPresent({ ...data, presence }, data.host.uid))
       throw new Error('Lobbyn är inte längre aktiv');
 
     const currentPlayers = data.players || {
@@ -821,7 +911,7 @@ export async function joinLobby(lobbyId, user) {
       },
     };
 
-    if (currentPlayers[user.uid]) return data;
+    if (currentPlayers[user.uid]) return { ...data, presence };
 
     const count = Object.keys(currentPlayers).length;
     if (count >= MAX_PLAYERS || (data.playerCount && data.playerCount >= MAX_PLAYERS)) {
@@ -861,8 +951,10 @@ export async function joinLobby(lobbyId, user) {
     }
 
     tx.update(lobbyRef, updatePayload);
-    return { ...data, ...updatePayload };
+    return { ...data, ...updatePayload, presence };
   });
+  await connectPlayerPresence(cleanId, user.uid);
+  return joined;
 }
 
 /**
@@ -933,13 +1025,21 @@ export async function startMatch(lobbyId) {
       throw new Error('Kunde inte starta: matchklockan är inte synkroniserad');
     }
 
-    const playersMap = data.players || {
-      [data.host.uid]: { ...data.host, joinedAt: getMultiplayerNow(), score: 0 },
-      ...(data.guest
-        ? { [data.guest.uid]: { ...data.guest, joinedAt: getMultiplayerNow(), score: 0 } }
-        : {}),
+    const playersMap = {
+      ...(data.players || {
+        [data.host.uid]: { ...data.host, joinedAt: getMultiplayerNow(), score: 0 },
+        ...(data.guest
+          ? { [data.guest.uid]: { ...data.guest, joinedAt: getMultiplayerNow(), score: 0 } }
+          : {}),
+      }),
     };
 
+    const presence = await readPresence(tx, db, lobbyId, data);
+    if (!isPlayerPresent({ ...data, presence }, data.host.uid))
+      throw new Error('Värden är inte längre ansluten');
+    for (const uid of Object.keys(playersMap)) {
+      if (!isPlayerPresent({ ...data, presence }, uid)) delete playersMap[uid];
+    }
     const count = Object.keys(playersMap).length;
     if (count < MIN_PLAYERS) {
       throw new Error('Väntar på att minst en till motståndare ansluter');
@@ -959,8 +1059,7 @@ export async function startMatch(lobbyId) {
       initialScores[pUid] = 0;
     }
 
-    const guestUid =
-      data.guest?.uid || Object.keys(playersMap).find((id) => id !== data.host.uid) || null;
+    const guestUid = Object.keys(playersMap).find((id) => id !== data.host.uid) || null;
 
     const game = {
       questions: questionsList,
@@ -971,7 +1070,7 @@ export async function startMatch(lobbyId) {
       hostUid: data.host.uid,
       guestUid,
       hostElo: data.host.elo || DEFAULT_ELO,
-      guestElo: data.guest?.elo || DEFAULT_ELO,
+      guestElo: playersMap[guestUid]?.elo || DEFAULT_ELO,
       playerUids: Object.keys(playersMap),
       scores: initialScores,
       answers: {},
@@ -982,6 +1081,9 @@ export async function startMatch(lobbyId) {
 
     tx.update(lobbyRef, {
       status: 'playing',
+      players: playersMap,
+      playerCount: count,
+      guest: playersMap[guestUid] || null,
       game,
       updatedAt: now,
     });
@@ -1208,20 +1310,39 @@ async function finishMatchInTransaction(tx, lobbyRef, matchId, game, now, player
  * Subscribes to live updates for a single lobby.
  */
 export function subscribeToLobby(lobbyId, callback, onError) {
-  const lobbyRef = doc(db, 'lobbies', lobbyId);
-  return onSnapshot(
-    lobbyRef,
+  let lobby = null;
+  let presence = {};
+  let lobbyLoaded = false;
+  let presenceLoaded = false;
+  const publish = () => {
+    if (lobbyLoaded && presenceLoaded) callback(lobby ? { ...lobby, presence } : null);
+  };
+  const stopPresence = onSnapshot(
+    collection(db, 'lobbies', lobbyId, 'presence'),
     { includeMetadataChanges: true },
     (snap) => {
       if (snap.metadata.hasPendingWrites) return;
-      if (snap.exists()) {
-        callback(snap.data());
-      } else {
-        callback(null);
-      }
+      presence = Object.fromEntries(snap.docs.map((p) => [p.id, p.data()]));
+      presenceLoaded = true;
+      publish();
     },
     onError,
   );
+  const stopLobby = onSnapshot(
+    doc(db, 'lobbies', lobbyId),
+    { includeMetadataChanges: true },
+    (snap) => {
+      if (snap.metadata.hasPendingWrites) return;
+      lobby = snap.exists() ? snap.data() : null;
+      lobbyLoaded = true;
+      publish();
+    },
+    onError,
+  );
+  return () => {
+    stopLobby();
+    stopPresence();
+  };
 }
 
 /**
@@ -1230,14 +1351,30 @@ export function subscribeToLobby(lobbyId, callback, onError) {
 export function subscribeToOpenLobbies(callback, onError) {
   const q = query(collection(db, 'lobbies'), where('status', '==', 'waiting'));
   let waiting = [];
+  const watches = new Map();
+  const presences = new Map();
   const publish = () => {
     const now = getMultiplayerNow();
     callback(
       waiting
+        .map((data) => ({
+          ...data,
+          readyCount: data.presenceVersion
+            ? Object.values(data.players || {}).filter(
+                (p) =>
+                  p.ready !== false &&
+                  isPlayerPresent({ ...data, presence: presences.get(data.id) }, p.uid, now),
+              ).length
+            : data.playerCount || (data.guest ? 2 : 1),
+        }))
         .filter((data) => {
           const count = data.playerCount || (data.guest ? 2 : 1);
           const isFull = count >= MAX_PLAYERS;
-          const isFresh = now - (data.heartbeat || data.createdAt || 0) < HEARTBEAT_TTL_MS;
+          const isFresh = isPlayerPresent(
+            { ...data, presence: presences.get(data.id) },
+            data.host.uid,
+            now,
+          );
           return !isFull && isFresh;
         })
         .sort((a, b) => b.createdAt - a.createdAt)
@@ -1248,6 +1385,29 @@ export function subscribeToOpenLobbies(callback, onError) {
     q,
     (snapshot) => {
       waiting = snapshot.docs.map((snapshot) => snapshot.data());
+      for (const [id, stop] of watches) {
+        if (!waiting.some((lobby) => lobby.id === id)) {
+          stop();
+          watches.delete(id);
+          presences.delete(id);
+        }
+      }
+      for (const lobby of waiting) {
+        if (!lobby.presenceVersion || watches.has(lobby.id)) continue;
+        watches.set(
+          lobby.id,
+          onSnapshot(
+            collection(db, 'lobbies', lobby.id, 'presence'),
+            { includeMetadataChanges: true },
+            (snap) => {
+              if (snap.metadata.hasPendingWrites) return;
+              presences.set(lobby.id, Object.fromEntries(snap.docs.map((p) => [p.id, p.data()])));
+              publish();
+            },
+            onError,
+          ),
+        );
+      }
       publish();
     },
     onError,
@@ -1256,6 +1416,7 @@ export function subscribeToOpenLobbies(callback, onError) {
   return () => {
     unsubscribe();
     clearInterval(expiryTimer);
+    for (const stop of watches.values()) stop();
   };
 }
 
