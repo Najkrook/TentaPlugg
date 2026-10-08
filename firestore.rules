@@ -71,11 +71,13 @@ service cloud.firestore {
     match /lobbies/{lobbyId} {
       allow read: if request.auth != null;
       allow create: if request.auth != null
+        && request.resource.data.protocolVersion == 2
+        && request.resource.data.gameRevision == 0
         && request.resource.data.host.uid == request.auth.uid
         && request.resource.data.status == 'waiting'
         && request.resource.data.get('playerCount', 1) <= 10;
 
-      allow update: if request.auth != null && (
+      allow update: if request.auth != null && compatibleGameWrite() && (
         // Host can update their lobby
         request.auth.uid == resource.data.host.uid ||
         // Guest can update if already in the lobby
@@ -97,6 +99,21 @@ service cloud.firestore {
 
       allow delete: if request.auth != null
         && resource.data.host.uid == request.auth.uid;
+
+      // Older clients preserve unknown fields when spreading game state. Require
+      // a fresh server transform as well as the protocol on every game write.
+      function compatibleGameWrite() {
+        return resource.data.get('protocolVersion', 0) == 2
+          && request.resource.data.protocolVersion == 2
+          && (
+            (!request.resource.data.diff(resource.data).affectedKeys()
+              .hasAny(['game', 'status', 'gameRevision', 'gameUpdatedAt'])) || (
+              resource.data.status != 'finished'
+              && request.resource.data.gameUpdatedAt == request.time
+              && (request.resource.data.game == null || request.resource.data.game.protocolVersion == 2)
+            )
+          );
+      }
 
       match /presence/{userId} {
         allow read: if request.auth != null;
@@ -123,8 +140,35 @@ service cloud.firestore {
 
       match /answers/{answerId} {
         allow read: if request.auth != null;
-        allow create, update: if request.auth != null
-          && request.resource.data.uid == request.auth.uid;
+        allow create: if request.auth != null && validReceipt();
+        // An exact retransmission is harmless; neither choice nor time can change.
+        allow update: if request.auth != null
+          && resource.data.uid == request.auth.uid
+          && resource.data.protocolVersion == 2
+          && request.resource.data == resource.data;
+
+        function validReceipt() {
+          let lobby = get(/databases/$(database)/documents/lobbies/$(lobbyId)).data;
+          let r = request.resource.data;
+          let game = lobby.game;
+          // Before reduction, allow candidate receipts up to the latest possible
+          // window. Reduction rejects candidates at/after the true first+8s cutoff.
+          let upperBound = game.firstAnswerAt == null
+            ? game.roundStartTime + 68000 : game.firstAnswerAt + 8000;
+          return lobby.protocolVersion == 2 && game.protocolVersion == 2
+            && lobby.status == 'playing' && game.status == 'playing'
+            && r.keys().hasOnly(['protocolVersion', 'uid', 'roundIndex', 'answer', 'attemptId', 'receivedAt'])
+            && r.protocolVersion == 2
+            && r.uid == request.auth.uid && r.uid in game.playerUids
+            && !(r.uid in game.get('forfeitedUids', []))
+            && r.roundIndex is int && r.roundIndex == game.currentRoundIndex
+            && answerId == string(r.roundIndex) + '_' + r.uid
+            && r.answer is string && r.answer.size() <= 2000
+            && r.attemptId is string && r.attemptId.size() > 0 && r.attemptId.size() <= 128
+            && r.receivedAt == request.time
+            && request.time.toMillis() >= game.roundStartTime
+            && request.time.toMillis() < upperBound;
+        }
       }
     }
   }

@@ -6,7 +6,7 @@
 
 **Status:** ready-for-agent
 
-**Workflow:** open
+**Workflow:** in-progress
 
 **Prioritet:** P1
 

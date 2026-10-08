@@ -133,7 +133,14 @@ test('lobbies: only participants can update, outsiders are rejected', async () =
 
   // Alice creates lobby as host
   await assertSucceeds(
-    setDoc(doc(a, 'lobbies/lobby1'), { host: { uid: 'alice' }, guest: null, status: 'waiting' }),
+    setDoc(doc(a, 'lobbies/lobby1'), {
+      protocolVersion: 2,
+      gameRevision: 0,
+      game: null,
+      host: { uid: 'alice' },
+      guest: null,
+      status: 'waiting',
+    }),
   );
 
   // Charlie (outsider) cannot update Alice's lobby
@@ -157,6 +164,8 @@ test('lobbies: only participants can update, outsiders are rejected', async () =
   await assertSucceeds(
     updateDoc(doc(a, 'lobbies/lobby1'), {
       status: 'playing',
+      gameRevision: 1,
+      gameUpdatedAt: serverTimestamp(),
     }),
   );
 });
@@ -189,6 +198,9 @@ test('lobbies 10-players: enforces max 10 player capacity and allows individual 
   // Host creates lobby with 1 player
   await assertSucceeds(
     setDoc(doc(host, 'lobbies/party1'), {
+      protocolVersion: 2,
+      gameRevision: 0,
+      game: null,
       host: { uid: 'host1' },
       players: { host1: { uid: 'host1' } },
       playerCount: 1,
@@ -218,8 +230,8 @@ test('lobbies 10-players: enforces max 10 player capacity and allows individual 
     }),
   );
 
-  // Subcollection answers: p1 can write their own answer
-  await assertSucceeds(
+  // Legacy answer shape is rejected even for the owner in a versioned lobby.
+  await assertFails(
     setDoc(doc(players[0], 'lobbies/party1/answers/0_p1'), {
       roundIndex: 0,
       uid: 'p1',

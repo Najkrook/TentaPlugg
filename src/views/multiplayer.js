@@ -30,6 +30,7 @@ import {
   TIMEOUT_PENALTY,
   MAX_PLAYERS,
   MIN_PLAYERS,
+  MATCH_PROTOCOL_VERSION,
   MAX_CLOCK_UNCERTAINTY_MS,
   MAX_CLOCK_AGE_MS,
 } from '../multiplayer.js';
@@ -243,6 +244,7 @@ export function multiplayerView(ctx) {
       const pauseExpired = game.status === 'round_end' && now >= game.nextRoundAt;
       // Host triggers advance immediately; guests only act as a safety fallback (+3s delay)
       const due =
+        currentLobbyData.receiptsPending ||
         (roundExpired && (isHost || now >= getRoundDeadline(game) + 3000)) ||
         (pauseExpired && (isHost || now >= game.nextRoundAt + 2000));
 
@@ -279,6 +281,13 @@ export function multiplayerView(ctx) {
 
   if (!activeLobbyId || !currentLobbyData) {
     return lobbyBrowserView(ctx);
+  }
+
+  if (
+    currentLobbyData.status !== 'finished' &&
+    currentLobbyData.protocolVersion !== MATCH_PROTOCOL_VERSION
+  ) {
+    return html`<p role="alert">Uppdatera sidan för att använda matchens protokoll.</p>`;
   }
 
   if (currentLobbyData.status === 'waiting') {

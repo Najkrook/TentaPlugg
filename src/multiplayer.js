@@ -47,6 +47,12 @@ export const MAX_PLAYERS = 10;
 export const MIN_PLAYERS = 2;
 export const HEARTBEAT_TTL_MS = 45000; // 45s heartbeat timeout for lobbies
 export const IDLE_ROUND_TIME_MS = 60000;
+export const MATCH_PROTOCOL_VERSION = 2;
+
+function requireCurrentProtocol(lobby) {
+  if (lobby.protocolVersion !== MATCH_PROTOCOL_VERSION)
+    throw new Error('Uppdatera sidan för att använda matchens protokoll');
+}
 
 export function getMultiplayerNow() {
   return multiplayerNow(db);
@@ -800,6 +806,8 @@ export async function createLobby(user, category) {
   const now = getMultiplayerNow();
   const lobbyData = {
     id: code,
+    protocolVersion: MATCH_PROTOCOL_VERSION,
+    gameRevision: 0,
     presenceVersion: 1,
     category,
     status: 'waiting',
@@ -895,6 +903,7 @@ export async function joinLobby(lobbyId, user) {
     if (!snap.exists()) throw new Error('Lobbyn hittades inte');
     const data = snap.data();
     if (data.status !== 'waiting') throw new Error('Matchen har redan startat');
+    requireCurrentProtocol(data);
     const presence = await readPresence(tx, db, cleanId, data);
     if (!isPlayerPresent({ ...data, presence }, data.host.uid))
       throw new Error('Lobbyn är inte längre aktiv');
@@ -1018,6 +1027,7 @@ export async function startMatch(lobbyId) {
     const snap = await tx.get(lobbyRef);
     if (!snap.exists()) throw new Error('Lobbyn finns inte');
     const data = snap.data();
+    requireCurrentProtocol(data);
     if (data.status !== 'waiting') return data.game;
 
     const clock = getMultiplayerClock(db);
@@ -1062,6 +1072,7 @@ export async function startMatch(lobbyId) {
     const guestUid = Object.keys(playersMap).find((id) => id !== data.host.uid) || null;
 
     const game = {
+      protocolVersion: MATCH_PROTOCOL_VERSION,
       questions: questionsList,
       currentRoundIndex: 0,
       roundStartTime: now + 3000, // 3s countdown before first round
@@ -1081,6 +1092,8 @@ export async function startMatch(lobbyId) {
 
     tx.update(lobbyRef, {
       status: 'playing',
+      gameRevision: data.gameRevision + 1,
+      gameUpdatedAt: serverTimestamp(),
       players: playersMap,
       playerCount: count,
       guest: playersMap[guestUid] || null,
@@ -1092,13 +1105,81 @@ export async function startMatch(lobbyId) {
 }
 
 /**
- * Submits an answer in the current round.
- * Writes atomically to `/lobbies/{lobbyId}/answers/{roundIndex}_{uid}`
- * and updates game state in transaction.
- * If all connected players have answered or if last round finishes, updates standings.
- * Returns { status, answer? }: accepted/already-received include the persisted
- * answer; late/stale-round/closed/rejected never imply success. Transport errors
- * reject the promise. Retrying callers must retain their choice and attemptId.
+ * Deterministic reduction of immutable receipts. Rebuild only the current round:
+ * subtract its previous points first, so retries never award points twice.
+ * Equal server timestamps are ordered by UID (code-point order); time points tie.
+ */
+export function summarizeRoundReceipts(game, receipts, now, playersMap = null, close = true) {
+  if (game.status !== 'playing') return game;
+  const round = game.currentRoundIndex;
+  const previous = game.answers?.[round] || {};
+  const scores = { ...game.scores };
+  for (const [uid, answer] of Object.entries(previous)) {
+    if (!game.forfeitedUids?.includes(uid)) scores[uid] -= answer.pointsAwarded;
+  }
+  const ordered = receipts
+    .filter(
+      (r) =>
+        r &&
+        r.protocolVersion === MATCH_PROTOCOL_VERSION &&
+        r.roundIndex === round &&
+        game.playerUids.includes(r.uid) &&
+        r.receivedAt?.toMillis() >= game.roundStartTime,
+    )
+    .sort(
+      (a, b) =>
+        a.receivedAt.toMillis() - b.receivedAt.toMillis() ||
+        (a.uid < b.uid ? -1 : a.uid > b.uid ? 1 : 0),
+    );
+  const first = ordered[0]?.receivedAt.toMillis();
+  const firstAnswerAt = first < game.roundStartTime + IDLE_ROUND_TIME_MS ? first : null;
+  const deadline =
+    firstAnswerAt == null
+      ? game.roundStartTime + IDLE_ROUND_TIME_MS
+      : firstAnswerAt + ROUND_TIME_MS;
+  const answers = {};
+  let winner = null;
+  for (const receipt of ordered) {
+    const timestamp = receipt.receivedAt.toMillis();
+    if (timestamp >= deadline || firstAnswerAt == null) continue;
+    const isCorrect = isAnswerCorrect(game.questions[round], receipt.answer);
+    const pointsAwarded = calculateTimePoints(isCorrect, timestamp - firstAnswerAt);
+    answers[receipt.uid] = { ...receipt, timestamp, isCorrect, pointsAwarded };
+    if (!game.forfeitedUids?.includes(receipt.uid)) {
+      scores[receipt.uid] = (scores[receipt.uid] || 0) + pointsAwarded;
+      if (isCorrect && winner == null) winner = receipt.uid;
+    }
+  }
+  const roundWinners = { ...game.roundWinners };
+  if (winner) roundWinners[round] = winner;
+  else delete roundWinners[round];
+  const updated = {
+    ...game,
+    scores,
+    answers: { ...game.answers, [round]: answers },
+    firstAnswerAt,
+    roundDeadline: firstAnswerAt == null ? null : deadline,
+    roundWinner: winner,
+    roundWinners,
+  };
+  return close && (now >= deadline || getActivePlayerUids(game).every((uid) => answers[uid]))
+    ? closeRound(updated, now, playersMap)
+    : updated;
+}
+
+async function readRoundReceipts(tx, database, lobbyId, game) {
+  const snapshots = await Promise.all(
+    game.playerUids.map((uid) =>
+      tx.get(doc(database, 'lobbies', lobbyId, 'answers', `${game.currentRoundIndex}_${uid}`)),
+    ),
+  );
+  return snapshots.map((snap) => snap.data()).filter(Boolean);
+}
+
+/**
+ * Receive independently of the shared lobby transaction, then reconcile. The
+ * receipt document is create-only and its receivedAt must equal request.time.
+ * Even if this caller disappears, any participant can complete the reduction.
  */
 export async function submitPlayerAnswer(
   lobbyId,
@@ -1107,103 +1188,150 @@ export async function submitPlayerAnswer(
   selectedAnswer,
   attemptId = crypto.randomUUID(),
 ) {
-  const answerRef = doc(db, 'lobbies', lobbyId, 'answers', `${roundIndex}_${uid}`);
-  const lobbyRef = doc(db, 'lobbies', lobbyId);
-
-  return runTransaction(db, async (tx) => {
-    const snap = await tx.get(lobbyRef);
-    if (!snap.exists()) return { status: 'closed' };
-    const data = snap.data();
-    if (!data.game) return { status: 'closed' };
-
-    const game = data.game;
-    const now = getMultiplayerNow();
-
-    // Reconcile even after the round has advanced: a lost acknowledgement must
-    // never turn a committed answer into another choice or another score.
-    const existing = game.answers?.[roundIndex]?.[uid];
-    if (existing && !existing.timedOut) return { status: 'already-received', answer: existing };
-    if (!isMultiplayerClockValid(db)) return { status: 'rejected', reason: 'clock-invalid' };
-    if (game.currentRoundIndex !== roundIndex) return { status: 'stale-round' };
-    if (game.status !== 'playing' || existing) return { status: 'closed' };
-    if (isRoundExpired(game, now)) return { status: 'late' };
-    const updatedGame = evaluateRound(game, uid, selectedAnswer, now, data.players);
-    if (updatedGame === game) return { status: 'rejected' };
-    updatedGame.answers[roundIndex][uid].attemptId = attemptId;
-
-    const updatedPlayers = { ...(data.players || {}) };
-    for (const pUid of Object.keys(updatedGame.scores || {})) {
-      if (updatedPlayers[pUid]) {
-        updatedPlayers[pUid] = { ...updatedPlayers[pUid], score: updatedGame.scores[pUid] };
-      }
-    }
-
-    if (updatedGame.status === 'finished') {
-      // This helper reads every profile before queuing writes. The answer must be queued after it.
-      await finishMatchInTransaction(tx, lobbyRef, lobbyId, updatedGame, now, updatedPlayers);
-    } else {
-      tx.update(lobbyRef, {
-        game: updatedGame,
-        players: updatedPlayers,
-        status: updatedGame.status,
-        updatedAt: now,
+  const database = db;
+  const answerRef = doc(database, 'lobbies', lobbyId, 'answers', `${roundIndex}_${uid}`);
+  const lobbyRef = doc(database, 'lobbies', lobbyId);
+  let status;
+  try {
+    const reception = await runTransaction(database, async (tx) => {
+      const receipt = (await tx.get(answerRef)).data();
+      if (receipt) return { status: 'already-received' };
+      // This read is deliberately outside the transaction's conflict set. Rules
+      // validate current membership/round at commit; other answers do not retry
+      // this receipt. Only a duplicate for this same participant can conflict.
+      const data = (await getDocFromServer(lobbyRef)).data();
+      if (!data?.game) return { status: 'closed' };
+      requireCurrentProtocol(data);
+      const game = data.game;
+      if (!isMultiplayerClockValid(database))
+        return { status: 'rejected', reason: 'clock-invalid' };
+      if (game.currentRoundIndex !== roundIndex) return { status: 'stale-round' };
+      if (game.status !== 'playing') return { status: 'closed' };
+      if (
+        !getActivePlayerUids(game).includes(uid) ||
+        multiplayerNow(database) < game.roundStartTime
+      )
+        return { status: 'rejected' };
+      // An unsummarized first receipt near 60s can extend the window by eight seconds.
+      tx.set(answerRef, {
+        protocolVersion: MATCH_PROTOCOL_VERSION,
+        uid,
+        roundIndex,
+        answer: selectedAnswer,
+        attemptId,
+        receivedAt: serverTimestamp(),
       });
+      return { status: 'accepted' };
+    });
+    if (!['accepted', 'already-received'].includes(reception.status)) return reception;
+    status = reception.status;
+  } catch (error) {
+    if (error.code !== 'permission-denied') throw error;
+    const receipt = (await getDocFromServer(answerRef)).data();
+    if (!receipt) {
+      const latest = (await getDocFromServer(lobbyRef)).data()?.game;
+      if (latest?.currentRoundIndex !== roundIndex) return { status: 'stale-round' };
+      if (latest?.status !== 'playing') return { status: 'closed' };
+      const upperBound =
+        latest.firstAnswerAt == null
+          ? latest.roundStartTime + IDLE_ROUND_TIME_MS + ROUND_TIME_MS
+          : getRoundDeadline(latest);
+      if (multiplayerNow(database) >= upperBound) return { status: 'late' };
+      throw error; // A transport/permission failure is not evidence of a late answer.
     }
-    tx.set(answerRef, updatedGame.answers[roundIndex][uid]);
-
-    return { status: 'accepted', answer: updatedGame.answers[roundIndex][uid] };
-  });
+    status = 'already-received';
+  }
+  const game = await reconcileMatch(lobbyId, database);
+  const answer = game?.answers?.[roundIndex]?.[uid];
+  if (answer && !answer.timedOut) return { status, answer };
+  return { status: 'late' };
 }
 
 export const submitAnswer = submitPlayerAnswer;
 
-/**
- * Advances to next round if pause timer elapsed or handles round timeout.
+/** Read every participant's receipt, including absent documents, in the same
+ * transaction as closing. A racing receipt forces a retry before timeout or ELO.
  */
-export async function advanceRoundIfDue(lobbyId) {
-  const lobbyRef = doc(db, 'lobbies', lobbyId);
-  return runTransaction(db, async (tx) => {
-    const snap = await tx.get(lobbyRef);
-    if (!snap.exists()) return;
-    const data = snap.data();
-    if (!data.game) return;
-
-    const now = getMultiplayerNow();
-    const game = data.game;
-
-    if (game.status === 'round_end' && game.nextRoundAt && now >= game.nextRoundAt) {
-      const nextGame = advanceToNextRound(game, now);
-      tx.update(lobbyRef, {
-        game: nextGame,
-        status: nextGame.status,
-        updatedAt: now,
-      });
-    } else if (isRoundExpired(game, now)) {
-      const playersMap = data.players || {};
-      const updated = closeRound(game, now, playersMap);
-      if (updated.status === 'finished') {
-        await finishMatchInTransaction(tx, lobbyRef, lobbyId, updated, now, playersMap);
-      } else {
-        tx.update(lobbyRef, { game: updated, status: updated.status, updatedAt: now });
+async function reconcileMatch(lobbyId, database, retries = MAX_PLAYERS * 2) {
+  const lobbyRef = doc(database, 'lobbies', lobbyId);
+  let attemptedRevision;
+  try {
+    return await runTransaction(database, async (tx) => {
+      const data = (await tx.get(lobbyRef)).data();
+      if (!data?.game) return null;
+      attemptedRevision = data.gameRevision;
+      requireCurrentProtocol(data);
+      const game = data.game;
+      if (game.status === 'finished') return game;
+      const clock = getMultiplayerClock(database);
+      if (!clock.valid) throw new Error('Matchklockan behöver synkroniseras före sammanställning');
+      // Closing must not run ahead of server time within clock uncertainty.
+      const now = clock.now - clock.uncertainty;
+      let updated = game;
+      if (game.status === 'playing') {
+        const receipts = await readRoundReceipts(tx, database, lobbyId, game);
+        updated = summarizeRoundReceipts(game, receipts, now, data.players);
+      } else if (clock.valid && game.status === 'round_end' && now >= game.nextRoundAt) {
+        updated = advanceToNextRound(game, clock.now);
       }
-    }
-  });
+      if (JSON.stringify(updated) === JSON.stringify(game)) return game;
+      const players = { ...data.players };
+      for (const uid of Object.keys(updated.scores))
+        if (players[uid]) players[uid] = { ...players[uid], score: updated.scores[uid] };
+      if (updated.status === 'finished') {
+        await finishMatchInTransaction(
+          tx,
+          lobbyRef,
+          lobbyId,
+          updated,
+          clock.now,
+          players,
+          database,
+          data.gameRevision + 1,
+        );
+      } else {
+        tx.update(lobbyRef, {
+          game: updated,
+          players,
+          status: updated.status,
+          gameRevision: data.gameRevision + 1,
+          gameUpdatedAt: serverTimestamp(),
+          updatedAt: clock.now,
+        });
+      }
+      return updated;
+    });
+  } catch (error) {
+    // Competing finalizers can meet the exactly-once rating rule before Firestore
+    // reports the optimistic conflict. Only a durable finish reconciles that error.
+    if (error.code !== 'permission-denied') throw error;
+    const latest = (await getDocFromServer(lobbyRef)).data();
+    if (latest?.game?.status === 'finished') return latest.game;
+    if (retries > 0 && latest?.gameRevision > attemptedRevision)
+      return reconcileMatch(lobbyId, database, retries - 1);
+    throw error;
+  }
+}
+
+export async function advanceRoundIfDue(lobbyId) {
+  return reconcileMatch(lobbyId, db);
 }
 
 /**
  * Handles match forfeit inside an active transaction.
  */
 async function applyForfeitInTransaction(tx, lobbyRef, lobbyData, forfeitingUid, now) {
-  const game = lobbyData.game;
+  requireCurrentProtocol(lobbyData);
+  const receipts = await readRoundReceipts(tx, lobbyRef.firestore, lobbyData.id, lobbyData.game);
+  const game = summarizeRoundReceipts(lobbyData.game, receipts, now, lobbyData.players, false);
   const activeUids = getActivePlayerUids(game);
   if (!activeUids.includes(forfeitingUid)) return;
 
   // Keep all participants for final ratings, but no longer wait for a departed player's answers.
   const scores = { ...game.scores, [forfeitingUid]: -9999 };
   const playersMap = { ...(lobbyData.players || {}) };
-  if (playersMap[forfeitingUid]) {
-    playersMap[forfeitingUid] = { ...playersMap[forfeitingUid], score: scores[forfeitingUid] };
-  }
+  for (const uid of Object.keys(scores))
+    if (playersMap[uid]) playersMap[uid] = { ...playersMap[uid], score: scores[uid] };
   let updated = {
     ...game,
     scores,
@@ -1225,10 +1353,21 @@ async function applyForfeitInTransaction(tx, lobbyRef, lobbyData, forfeitingUid,
   }
 
   if (updated.status === 'finished') {
-    await finishMatchInTransaction(tx, lobbyRef, lobbyData.id, updated, now, playersMap);
+    await finishMatchInTransaction(
+      tx,
+      lobbyRef,
+      lobbyData.id,
+      updated,
+      now,
+      playersMap,
+      lobbyRef.firestore,
+      lobbyData.gameRevision + 1,
+    );
   } else {
     tx.update(lobbyRef, {
       game: updated,
+      gameRevision: lobbyData.gameRevision + 1,
+      gameUpdatedAt: serverTimestamp(),
       players: playersMap,
       status: updated.status,
       updatedAt: now,
@@ -1239,7 +1378,16 @@ async function applyForfeitInTransaction(tx, lobbyRef, lobbyData, forfeitingUid,
 /**
  * Atomically updates all players' leaderboard records in the transaction.
  */
-async function finishMatchInTransaction(tx, lobbyRef, matchId, game, now, playersMap = null) {
+async function finishMatchInTransaction(
+  tx,
+  lobbyRef,
+  matchId,
+  game,
+  now,
+  playersMap = null,
+  database = lobbyRef.firestore,
+  gameRevision,
+) {
   const playersSource = playersMap || game.players || {};
   let uids = Object.keys(game.scores || {});
   if (uids.length === 0 && game.playerUids) {
@@ -1257,7 +1405,7 @@ async function finishMatchInTransaction(tx, lobbyRef, matchId, game, now, player
   const uniqueUids = [...new Set(uids.filter(Boolean))];
 
   // Firestore requires every read before any write in a transaction.
-  const refs = uniqueUids.map((uid) => doc(db, 'leaderboard', uid));
+  const refs = uniqueUids.map((uid) => doc(database, 'leaderboard', uid));
   const snapshots = await Promise.all(refs.map((ref) => tx.get(ref)));
 
   for (const [index, uid] of uniqueUids.entries()) {
@@ -1300,6 +1448,8 @@ async function finishMatchInTransaction(tx, lobbyRef, matchId, game, now, player
   }
   tx.update(lobbyRef, {
     status: 'finished',
+    gameRevision,
+    gameUpdatedAt: serverTimestamp(),
     game,
     updatedAt: now,
     ...(playersMap ? { players: playersMap } : {}),
@@ -1312,11 +1462,37 @@ async function finishMatchInTransaction(tx, lobbyRef, matchId, game, now, player
 export function subscribeToLobby(lobbyId, callback, onError) {
   let lobby = null;
   let presence = {};
+  let receipts = [];
   let lobbyLoaded = false;
   let presenceLoaded = false;
   const publish = () => {
-    if (lobbyLoaded && presenceLoaded) callback(lobby ? { ...lobby, presence } : null);
+    if (lobbyLoaded && presenceLoaded)
+      callback(
+        lobby
+          ? {
+              ...lobby,
+              presence,
+              receiptsPending:
+                lobby.game?.status === 'playing' &&
+                receipts.some(
+                  (r) =>
+                    r.roundIndex === lobby.game.currentRoundIndex &&
+                    !lobby.game.answers?.[r.roundIndex]?.[r.uid],
+                ),
+            }
+          : null,
+      );
   };
+  const stopReceipts = onSnapshot(
+    collection(db, 'lobbies', lobbyId, 'answers'),
+    { includeMetadataChanges: true },
+    (snap) => {
+      if (snap.metadata.hasPendingWrites) return;
+      receipts = snap.docs.map((r) => r.data());
+      publish();
+    },
+    onError,
+  );
   const stopPresence = onSnapshot(
     collection(db, 'lobbies', lobbyId, 'presence'),
     { includeMetadataChanges: true },
@@ -1340,6 +1516,7 @@ export function subscribeToLobby(lobbyId, callback, onError) {
     onError,
   );
   return () => {
+    stopReceipts();
     stopLobby();
     stopPresence();
   };

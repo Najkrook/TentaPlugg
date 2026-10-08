@@ -3,11 +3,29 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { registerHooks } from 'node:module';
 import { initializeTestEnvironment, assertFails } from '@firebase/rules-unit-testing';
-import { doc, getDoc, updateDoc, setDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
+import {
+  doc,
+  getDoc,
+  updateDoc,
+  setDoc,
+  serverTimestamp,
+  Timestamp,
+  increment,
+} from 'firebase/firestore';
 import { useDatabase } from './multiplayer-db.js';
+import { interceptCommit } from './multiplayer-firestore.js';
 
 const hooks = registerHooks({
   resolve(specifier, context, nextResolve) {
+    if (
+      specifier === 'firebase/firestore' &&
+      context.parentURL === new URL('../../src/multiplayer.js', import.meta.url).href
+    ) {
+      return {
+        url: new URL('./multiplayer-firestore.js', import.meta.url).href,
+        shortCircuit: true,
+      };
+    }
     if (
       specifier === './cloud.js' &&
       context.parentURL === new URL('../../src/multiplayer.js', import.meta.url).href
@@ -50,7 +68,8 @@ async function match(count) {
     users,
     as,
     read: async () => (await getDoc(ref)).data(),
-    update: (patch) => updateDoc(ref, patch),
+    update: (patch) =>
+      updateDoc(ref, { ...patch, gameRevision: increment(1), gameUpdatedAt: serverTimestamp() }),
     profile: async (i) => (await getDoc(doc(databases[0], 'leaderboard', users[i].uid))).data(),
     answerDocument: async (i, round) =>
       getDoc(doc(databases[0], 'lobbies', code, 'answers', `${round}_${users[i].uid}`)),
@@ -80,6 +99,176 @@ test('ten players finish the last round with every answer and rating saved exact
   assert.equal((await m.profile(9)).matchesPlayed, 1);
 });
 
+test('simultaneous answers: ten receipts survive contention without false timeouts', async () => {
+  const m = await match(10);
+  await m.update({ 'game.roundStartTime': Date.now() - 100 });
+  const answer = (await m.read()).game.questions[0].correctAnswer;
+  const receipts = await Promise.all(
+    m.users.map((user, i) => m.as(i, () => mp.submitPlayerAnswer(m.code, user.uid, 0, answer))),
+  );
+  assert.equal(receipts.filter((r) => r.status === 'accepted').length, 10);
+  const saved = await m.read();
+  for (let i = 0; i < 10; i++) {
+    assert((await m.answerDocument(i, 0)).exists());
+    assert.equal(saved.game.answers[0][m.users[i].uid].timedOut, undefined);
+    assert.equal(saved.game.answers[0][m.users[i].uid].isCorrect, true);
+  }
+});
+
+test('received answers survive a forced commit conflict after deadline, including final ratings', async () => {
+  const m = await match(3);
+  const now = Date.now();
+  await m.update({ 'game.currentRoundIndex': 9, 'game.roundStartTime': now - 20000 });
+  await seedReceipt(m, 0, 9, now - 12000);
+  await seedReceipt(m, 1, 9, now - 12000); // exact tie: UID decides winner, points tie
+  await seedReceipt(m, 2, 9, now - 4001); // one millisecond before the deadline
+  const immutable = await Promise.all(
+    m.users.map((_, i) => m.answerDocument(i, 9).then((s) => s.data())),
+  );
+  let attempts = 0;
+  interceptCommit(async () => {
+    if (++attempts === 1) {
+      // Change a document read by the real transaction immediately before commit.
+      await env.withSecurityRulesDisabled((context) =>
+        updateDoc(doc(context.firestore(), 'lobbies', m.code), { updatedAt: Date.now() }),
+      );
+    }
+  });
+  try {
+    await m.as(1, () => mp.advanceRoundIfDue(m.code));
+  } finally {
+    interceptCommit(null);
+  }
+  assert(attempts >= 2, `Expected a real transaction retry, got ${attempts}`);
+  const game = (await m.read()).game;
+  assert.equal(game.status, 'finished');
+  assert.equal(game.firstAnswerAt, now - 12000);
+  assert.equal(game.roundDeadline, now - 4000);
+  assert.equal(game.roundWinners[9], m.users[0].uid);
+  for (let i = 0; i < 3; i++) {
+    const answer = game.answers[9][m.users[i].uid];
+    assert.equal(answer.pointsAwarded, mp.calculateTimePoints(true, i === 2 ? 7999 : 0));
+    assert.equal(answer.timedOut, undefined);
+    assert.deepEqual((await m.answerDocument(i, 9)).data(), immutable[i]);
+    assert.equal((await m.profile(i)).matchesPlayed, 1);
+  }
+  await m.as(0, () => Promise.all([mp.advanceRoundIfDue(m.code), mp.advanceRoundIfDue(m.code)]));
+  for (let i = 0; i < 3; i++) assert.equal((await m.profile(i)).matchesPlayed, 1);
+});
+
+test('server receipts exactly on and after the deadline are excluded, before is included', async () => {
+  const m = await match(4);
+  const now = Date.now();
+  await m.update({ 'game.roundStartTime': now - 20000 });
+  for (const [i, offset] of [0, 7999, 8000, 8001].entries())
+    await seedReceipt(m, i, 0, now - 10000 + offset);
+  await m.as(0, () => Promise.all([mp.advanceRoundIfDue(m.code), mp.advanceRoundIfDue(m.code)]));
+  const game = (await m.read()).game;
+  assert.equal(game.answers[0][m.users[1].uid].pointsAwarded, 200);
+  for (const i of [2, 3]) assert.equal(game.answers[0][m.users[i].uid].timedOut, true);
+  assert.equal(game.firstAnswerAt, now - 10000);
+});
+
+test('two participants finalize the same last-round receipts atomically once', async () => {
+  const m = await match(10);
+  const now = Date.now();
+  await m.update({ 'game.currentRoundIndex': 9, 'game.roundStartTime': now - 1000 });
+  for (let i = 0; i < 10; i++) await seedReceipt(m, i, 9, now);
+  await Promise.all([
+    m.as(0, () => mp.advanceRoundIfDue(m.code)),
+    m.as(1, () => mp.advanceRoundIfDue(m.code)),
+  ]);
+  const saved = await m.read();
+  assert.equal(saved.game.status, 'finished');
+  for (let i = 0; i < 10; i++) {
+    assert.equal(saved.game.answers[9][m.users[i].uid].pointsAwarded, 1000);
+    assert.equal(saved.players[m.users[i].uid].score, 1000);
+    assert.equal((await m.profile(i)).matchesPlayed, 1);
+    assert.equal((await m.profile(i)).draws, 1);
+    assert.equal((await m.profile(i)).elo, 1200);
+  }
+});
+
+test('forfeit reduces already received answers and keeps lobby scores in sync', async () => {
+  const m = await match(3);
+  const now = Date.now();
+  await m.update({ 'game.roundStartTime': now - 1000 });
+  await seedReceipt(m, 0, 0, now);
+  await seedReceipt(m, 1, 0, now);
+  await m.as(2, () => mp.leaveLobby(m.code, m.users[2].uid));
+  const saved = await m.read();
+  assert.equal(saved.game.status, 'round_end');
+  for (const i of [0, 1]) {
+    assert.equal(saved.game.scores[m.users[i].uid], 1000);
+    assert.equal(saved.players[m.users[i].uid].score, 1000);
+  }
+});
+
+test('receipt rules bind owner, version, round, identity, choice and immutable server time', async () => {
+  const m = await match(2);
+  await m.update({ 'game.roundStartTime': Date.now() - 100 });
+  const database = env.authenticatedContext(m.users[0].uid).firestore();
+  const ref = doc(database, 'lobbies', m.code, 'answers', `0_${m.users[0].uid}`);
+  const raw = {
+    protocolVersion: 2,
+    uid: m.users[0].uid,
+    roundIndex: 0,
+    answer: 'A',
+    attemptId: 'stable',
+    receivedAt: serverTimestamp(),
+  };
+  for (const patch of [
+    { protocolVersion: 1 },
+    { uid: m.users[1].uid },
+    { roundIndex: 1 },
+    { receivedAt: Timestamp.fromMillis(Date.now() - 1000) },
+  ])
+    await assertFails(setDoc(ref, { ...raw, ...patch }));
+  await assertFails(setDoc(doc(database, 'lobbies', m.code, 'answers', 'wrong-id'), raw));
+  const outsider = env.authenticatedContext('outsider-receipts').firestore();
+  await assertFails(
+    setDoc(doc(outsider, 'lobbies', m.code, 'answers', '0_outsider-receipts'), {
+      ...raw,
+      uid: 'outsider-receipts',
+    }),
+  );
+  const before = await m.read();
+  await setDoc(ref, raw);
+  assert.deepEqual(await m.read(), before, 'Receiving must not update the lobby');
+  const saved = (await getDoc(ref)).data();
+  await setDoc(ref, saved); // exact idempotent retransmission
+  for (const patch of [{ answer: 'B' }, { attemptId: 'other' }, { receivedAt: serverTimestamp() }])
+    await assertFails(updateDoc(ref, patch));
+  const lobbyRef = doc(database, 'lobbies', m.code);
+  await assertFails(updateDoc(lobbyRef, { 'game.firstAnswerAt': Date.now() }));
+  await assertFails(updateDoc(lobbyRef, { protocolVersion: 1 }));
+  await assertFails(updateDoc(lobbyRef, { 'game.protocolVersion': 1, gameRevision: increment(1) }));
+  const guest = env.authenticatedContext(m.users[1].uid).firestore();
+  const guestRef = doc(guest, 'lobbies', m.code, 'answers', `0_${m.users[1].uid}`);
+  const guestReceipt = { ...raw, uid: m.users[1].uid };
+  await m.update({ 'game.roundStartTime': Date.now() + 10000 });
+  await assertFails(setDoc(guestRef, guestReceipt));
+  await m.update({
+    'game.roundStartTime': Date.now() - 20000,
+    'game.firstAnswerAt': Date.now() - 9000,
+  });
+  await assertFails(setDoc(guestRef, guestReceipt));
+});
+
+test('legacy finished results remain readable without migrating their protocol', async () => {
+  const m = await match(2);
+  await m.as(0, () => mp.leaveLobby(m.code, m.users[0].uid));
+  const finished = await m.read();
+  const legacy = { ...finished, id: `${m.code}-legacy`, game: { ...finished.game } };
+  delete legacy.protocolVersion;
+  delete legacy.game.protocolVersion;
+  await env.withSecurityRulesDisabled((context) =>
+    setDoc(doc(context.firestore(), 'lobbies', legacy.id), legacy),
+  );
+  const reader = env.authenticatedContext(m.users[1].uid).firestore();
+  assert.deepEqual((await getDoc(doc(reader, 'lobbies', legacy.id))).data(), legacy);
+});
+
 test('answer receipts reconcile a lost acknowledgement without changing the first choice or score', async () => {
   const m = await match(2);
   await m.update({ 'game.roundStartTime': Date.now() - 100 });
@@ -100,7 +289,9 @@ test('answer receipts reconcile a lost acknowledgement without changing the firs
     answer: receipt.answer,
   });
   assert.deepEqual(await m.read(), saved);
-  assert.deepEqual((await m.answerDocument(0, 0)).data(), receipt.answer);
+  const raw = (await m.answerDocument(0, 0)).data();
+  assert.equal(raw.answer, receipt.answer.answer);
+  assert.equal(raw.receivedAt.toMillis(), receipt.answer.timestamp);
   await m.update({ 'game.currentRoundIndex': 1 });
   assert.equal((await submit(question.correctAnswer)).status, 'already-received');
   assert.equal(
@@ -110,15 +301,18 @@ test('answer receipts reconcile a lost acknowledgement without changing the firs
 });
 
 test('answer receipts distinguish late, closed and rejected rounds', async () => {
-  const m = await match(2);
-  const submit = () => m.as(0, () => mp.submitPlayerAnswer(m.code, m.users[0].uid, 0, 'x'));
+  const m = await match(3);
+  let player = 0;
+  const submit = () =>
+    m.as(player, () => mp.submitPlayerAnswer(m.code, m.users[player].uid, 0, 'x'));
   await m.update({ 'game.roundStartTime': Date.now() - 61000 });
   assert.equal((await submit()).status, 'late');
+  player = 1;
   await m.update({ 'game.status': 'round_end' });
   assert.equal((await submit()).status, 'closed');
   await m.update({ 'game.status': 'playing', 'game.roundStartTime': Date.now() + 10000 });
   assert.equal((await submit()).status, 'rejected');
-  assert.equal((await m.answerDocument(0, 0)).exists(), false);
+  assert.equal((await m.answerDocument(1, 0)).exists(), false);
 });
 
 test('answer API rejects submissions during the initial countdown', async () => {
@@ -133,7 +327,8 @@ test('answer API rejects submissions during the initial countdown', async () => 
 test('first answer near the idle limit still gives opponents eight seconds', async () => {
   const m = await match(2);
   const now = Date.now();
-  await m.update({ 'game.roundStartTime': now - 60000, 'game.firstAnswerAt': now - 1000 });
+  await m.update({ 'game.roundStartTime': now - 60000 });
+  await seedReceipt(m, 0, 0, now - 1000);
   await m.as(0, () => mp.advanceRoundIfDue(m.code));
   assert.equal((await m.read()).game.status, 'playing');
   const answer = (await m.read()).game.questions[0].correctAnswer;
@@ -281,7 +476,11 @@ test('clock quality enforcement blocks uncalibrated or invalidated matches and a
 
   // Recalibrating guest allows timely answer submission
   await as(1, () => mp.synchronizeMultiplayerClock(databases[1], users[1].uid, { force: true }));
-  await updateDoc(doc(databases[0], 'lobbies', code), { 'game.roundStartTime': Date.now() - 100 });
+  await updateDoc(doc(databases[0], 'lobbies', code), {
+    'game.roundStartTime': Date.now() - 100,
+    gameRevision: increment(1),
+    gameUpdatedAt: serverTimestamp(),
+  });
   const acceptedReceipt = await as(1, () =>
     mp.submitPlayerAnswer(code, users[1].uid, 0, game.questions[0].correctAnswer),
   );
@@ -384,3 +583,22 @@ test('a stale waiting guest is excluded when two present players start', async (
   assert.equal(lobby.guest.uid, m.users[2].uid);
   assert.equal(lobby.playerCount, 2);
 });
+
+// Admin fixtures only move time; production reads, reduction and rules stay real.
+async function seedReceipt(m, player, round, time, patch = {}) {
+  const question = (await m.read()).game.questions[round];
+  await env.withSecurityRulesDisabled((context) =>
+    setDoc(
+      doc(context.firestore(), 'lobbies', m.code, 'answers', `${round}_${m.users[player].uid}`),
+      {
+        protocolVersion: 2,
+        uid: m.users[player].uid,
+        roundIndex: round,
+        answer: question.correctAnswer,
+        attemptId: `fixture-${player}`,
+        receivedAt: Timestamp.fromMillis(time),
+        ...patch,
+      },
+    ),
+  );
+}

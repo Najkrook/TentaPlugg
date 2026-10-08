@@ -58,6 +58,123 @@ async function join(page, code, options = {}) {
   await expect(page.locator('.room-code-tag')).toHaveText(code, options);
 }
 
+// Expected optimistic commit conflicts are checked by response body, not hidden
+// with a broad console filter. All other network, page and console errors fail.
+function trackBrowserHealth(clients) {
+  const errors = [];
+  const networkErrors = [];
+  for (const client of clients) {
+    client.on('pageerror', (error) => errors.push({ text: error.message, url: '' }));
+    client.on('console', (message) => {
+      if (message.type() === 'error')
+        errors.push({ text: message.text(), url: message.location().url });
+    });
+    client.on('response', (response) => {
+      if (response.status() >= 400)
+        networkErrors.push(
+          (async () => ({
+            url: response.url(),
+            status: response.status(),
+            body: await response.json().catch(() => null),
+          }))(),
+        );
+    });
+  }
+  return async () => {
+    const conflicts = await Promise.all(networkErrors);
+    for (const failure of conflicts) {
+      expect(failure.url).toContain('127.0.0.1:8080/');
+      expect(failure.url).toContain('documents:commit');
+      if (failure.status === 409) {
+        // A receipt appeared after reduction read that document as missing.
+        expect(failure.body?.error.status).toBe('ALREADY_EXISTS');
+        expect(failure.body.error.message).toMatch(/entity already exists:.*\/answers\//);
+      } else {
+        expect(failure.status).toBe(400);
+        expect(failure.body?.error.status).toBe('FAILED_PRECONDITION');
+        expect(failure.body.error.message).toContain('does not match the required base version');
+      }
+    }
+    expect(
+      errors.filter(
+        (error) =>
+          !(
+            /Failed to load resource:.*(400|409)/.test(error.text) &&
+            conflicts.some((conflict) => conflict.url === error.url)
+          ),
+      ),
+    ).toEqual([]);
+  };
+}
+
+test('receipt contention: five fresh ten-client matches retain ten real simultaneous answers', async ({
+  browser,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== 'chromium', 'Heavy contention is covered in Chromium');
+  test.setTimeout(240000);
+  for (let run = 0; run < 5; run++) {
+    const clients = await Promise.all(Array.from({ length: 10 }, () => browser.newPage()));
+    const assertHealthy = trackBrowserHealth(clients);
+    try {
+      const uids = [];
+      for (const client of clients) uids.push(await login(client));
+      const code = await create(clients[0]);
+      for (const client of clients.slice(1)) await join(client, code);
+      await clients[0].getByRole('button', { name: 'Starta matchen!' }).click();
+      await Promise.all(
+        clients.map((client) =>
+          expect(client.locator('.choices-grid button').first()).toBeEnabled(),
+        ),
+      );
+      const question = (await read(clients[0], 'lobbies', code)).game.questions[0];
+      const results = await Promise.all(
+        clients.map((client, i) =>
+          client.evaluate(
+            async ({ code, uid, answer }) => {
+              const { submitPlayerAnswer } = await import('/src/multiplayer.js');
+              return submitPlayerAnswer(code, uid, 0, answer);
+            },
+            { code, uid: uids[i], answer: question.correctAnswer },
+          ),
+        ),
+      );
+      expect(results.every((r) => r.status === 'accepted')).toBe(true);
+      const saved = await read(clients[0], 'lobbies', code);
+      const raw = await clients[0].evaluate(
+        async ({ code, uids }) => {
+          const { db } = await import('/src/cloud.js');
+          const { doc, getDoc } = window.multiplayerTestFirestore;
+          return Promise.all(
+            uids.map(async (uid) => {
+              const receipt = (
+                await getDoc(doc(db, 'lobbies', code, 'answers', `0_${uid}`))
+              ).data();
+              return { ...receipt, receivedAtMs: receipt.receivedAt.toMillis() };
+            }),
+          );
+        },
+        { code, uids },
+      );
+      const first = Math.min(...raw.map((r) => r.receivedAtMs));
+      expect(saved.game.firstAnswerAt).toBe(first);
+      expect(saved.game.roundDeadline).toBe(first + 8000);
+      for (const receipt of raw) {
+        const answer = saved.game.answers[0][receipt.uid];
+        expect(receipt.answer).toBe(question.correctAnswer);
+        expect(receipt.attemptId).toBeTruthy();
+        expect(answer.timedOut).toBeUndefined();
+        expect(answer.isCorrect).toBe(true);
+        expect(answer.pointsAwarded).toBe(
+          Math.round(1000 * Math.max(0.2, 1 - (receipt.receivedAtMs - first) / 8000)),
+        );
+      }
+      await assertHealthy();
+    } finally {
+      await Promise.all(clients.map((client) => client.close()));
+    }
+  }
+});
+
 test('skewed device clocks preserve countdown, answer window and automatic round progression', async ({
   page,
   browser,
@@ -92,8 +209,10 @@ test('skewed device clocks preserve countdown, answer window and automatic round
     await page.evaluate(async (code) => {
       const { db } = await import('/src/cloud.js');
       const { getMultiplayerNow } = await import('/src/multiplayer.js');
-      const { doc, updateDoc } = window.multiplayerTestFirestore;
+      const { doc, updateDoc, increment, serverTimestamp } = window.multiplayerTestFirestore;
       await updateDoc(doc(db, 'lobbies', code), {
+        gameRevision: increment(1),
+        gameUpdatedAt: serverTimestamp(),
         'game.roundStartTime': getMultiplayerNow() - 59000,
       });
     }, code);
@@ -194,8 +313,10 @@ test('a three-player tie shows a loss to third place', async ({ page, browser },
     await page.evaluate(
       async ({ code, ids }) => {
         const { db } = await import('/src/cloud.js');
-        const { doc, updateDoc } = window.multiplayerTestFirestore;
+        const { doc, updateDoc, increment, serverTimestamp } = window.multiplayerTestFirestore;
         await updateDoc(doc(db, 'lobbies', code), {
+          gameRevision: increment(1),
+          gameUpdatedAt: serverTimestamp(),
           'game.currentRoundIndex': 9,
           'game.roundStartTime': Date.now() - 61000,
           'game.scores': { [ids[0]]: 1000, [ids[1]]: 1000, [ids[2]]: 0 },
@@ -282,11 +403,14 @@ test('final round timeout records a draw for both players, including legacy prof
     await page.evaluate(
       async ({ code, hostUid }) => {
         const { db } = await import('/src/cloud.js');
-        const { doc, runTransaction, deleteField } = window.multiplayerTestFirestore;
+        const { doc, runTransaction, deleteField, serverTimestamp } =
+          window.multiplayerTestFirestore;
         await runTransaction(db, async (tx) => {
           const ref = doc(db, 'lobbies', code);
           const snap = await tx.get(ref);
           tx.update(ref, {
+            gameRevision: snap.data().gameRevision + 1,
+            gameUpdatedAt: serverTimestamp(),
             game: { ...snap.data().game, currentRoundIndex: 9, roundStartTime: Date.now() - 61000 },
           });
           tx.update(doc(db, 'leaderboard', hostUid), { lastMatchId: deleteField() });
@@ -324,6 +448,8 @@ test('stale rooms cannot hide a fresh room and rooms expire without a new snapsh
         ids.forEach((id, i) =>
           batch.set(doc(db, 'lobbies', id), {
             id,
+            protocolVersion: 2,
+            gameRevision: 0,
             status: 'waiting',
             category: 'particles',
             guest: null,
@@ -396,14 +522,7 @@ for (const input of ['mouse', 'keyboard', 'touch']) {
     browser,
   }, testInfo) => {
     const guest = await browser.newPage();
-    const errors = [];
-    page.on('pageerror', (error) => errors.push(error.message));
-    guest.on('pageerror', (error) => errors.push(error.message));
-    for (const client of [page, guest]) {
-      client.on('console', (message) => {
-        if (message.type() === 'error') errors.push(message.text());
-      });
-    }
+    const assertHealthy = trackBrowserHealth([page, guest]);
     try {
       const uid = await login(page);
       await expect(page).toHaveTitle('TentaPlugg · Japanska');
@@ -460,7 +579,7 @@ for (const input of ['mouse', 'keyboard', 'touch']) {
       expect(saved.game.answers[0][uid].attemptId).toBeTruthy();
       expect(saved.game.scores[uid]).toBeGreaterThan(0);
       await expect(page.locator('.btn-correct .choice-text')).toHaveText(question.correctAnswer);
-      expect(errors).toEqual([]);
+      await assertHealthy();
     } finally {
       await page.unrouteAll({ behavior: 'wait' });
       await guest.close();
@@ -538,8 +657,10 @@ test('late delivery result cannot lock the next round or a reset view', async ({
     await guest.evaluate(async (code) => {
       const { db } = await import('/src/cloud.js');
       const { getMultiplayerNow } = await import('/src/multiplayer.js');
-      const { doc, updateDoc } = window.multiplayerTestFirestore;
+      const { doc, updateDoc, increment, serverTimestamp } = window.multiplayerTestFirestore;
       await updateDoc(doc(db, 'lobbies', code), {
+        gameRevision: increment(1),
+        gameUpdatedAt: serverTimestamp(),
         'game.currentRoundIndex': 1,
         'game.roundStartTime': getMultiplayerNow(),
       });
