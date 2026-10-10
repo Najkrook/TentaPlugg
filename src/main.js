@@ -89,6 +89,11 @@ const navs = [
   ['progress', 'ChartNoAxesCombined', 'Mina framsteg'],
   ['guide', 'Library', 'Snabbguide'],
 ];
+const studyNavs = [
+  ['vocabulary', 'BookOpen', 'Ordförråd (Genki)'],
+  ['particles', 'CircleHelp', 'Partikelguide'],
+];
+const mobileNavs = navs.filter(([id]) => id !== 'multiplayer');
 function announce(text) {
   message = text;
   render();
@@ -342,18 +347,7 @@ function render(focus = false) {
           ${navs.map(([id, i, label]) => html`<button class="nav-item ${view === id ? 'active' : ''}" @click=${() => navigate(id)}>${icon(i)}<span>${label}</span></button>`)}
         </nav>
         <div class="sidebar-study-links" role="group" aria-label="Referensmaterial">
-          <button
-            class="nav-item sub-nav-item ${view === 'vocabulary' ? 'active' : ''}"
-            @click=${() => navigate('vocabulary')}
-          >
-            ${icon('BookOpen')}<span>Ordförråd (Genki)</span>
-          </button>
-          <button
-            class="nav-item sub-nav-item ${view === 'particles' ? 'active' : ''}"
-            @click=${() => navigate('particles')}
-          >
-            ${icon('CircleHelp')}<span>Partikelguide</span>
-          </button>
+          ${studyNavs.map(([id, i, label]) => html`<button class="nav-item sub-nav-item ${view === id ? 'active' : ''}" @click=${() => navigate(id)}>${icon(i)}<span>${label}</span></button>`)}
         </div>
         ${
           state.theme === 'sakura'
@@ -488,8 +482,15 @@ function render(focus = false) {
           <span id="cloud-status" .textContent=${status}></span><span>GEMA70 · JAPC11</span>
         </footer>
       </div>
-      <nav class="mobile-nav">
-        ${navs.map(([id, i, l]) => html`<button class=${view === id ? 'active' : ''} @click=${() => navigate(id)}>${icon(i)}<span>${id === 'progress' ? 'Framsteg' : id === 'exams' ? 'Tentor' : id === 'multiplayer' ? '1v1' : l}</span></button>`)}
+      <nav class="mobile-nav" aria-label="Huvudmeny">
+        ${mobileNavs.map(([id, i, l]) => html`<button class=${view === id ? 'active' : ''} @click=${() => navigate(id)}>${icon(i)}<span>${id === 'progress' ? 'Framsteg' : id === 'exams' ? 'Tentor' : l}</span></button>`)}
+        <button
+          class=${mobileNavs.some(([id]) => id === view) ? '' : 'active'}
+          aria-haspopup="dialog"
+          @click=${openMobileMenu}
+        >
+          ${icon('Menu')}<span>Mer</span>
+        </button>
       </nav>
       <div class="sr-only" role="status" aria-live="polite" aria-atomic="true">${message}</div>
       ${message ? html`<div id="toast" aria-hidden="true">${message}</div>` : ''}`,
@@ -499,6 +500,56 @@ function render(focus = false) {
     document.querySelector('main h1')?.focus({ preventScroll: true });
     window.scrollTo(0, 0);
   }
+}
+function openMobileMenu(event) {
+  const previousFocus = event.currentTarget;
+  const dialog = document.createElement('dialog');
+  dialog.className = 'mobile-menu';
+  dialog.setAttribute('aria-labelledby', 'mobile-menu-title');
+  const close = () => {
+    dialog.close();
+    dialog.remove();
+    previousFocus?.focus();
+  };
+  renderTemplate(
+    html` <div class="mobile-menu-heading">
+        <h2 id="mobile-menu-title">Alla sidor</h2>
+        <button class="secondary" @click=${close} aria-label="Stäng menyn">Stäng</button>
+      </div>
+      <nav aria-label="Alla sidor">
+        ${[...navs, ...studyNavs].map(
+          ([id, i, label]) =>
+            html` <button
+              class="nav-item ${view === id ? 'active' : ''}"
+              aria-current=${view === id ? 'page' : 'false'}
+              @click=${() => {
+                close();
+                navigate(id);
+              }}
+            >
+              ${icon(i)}<span>${label}</span>
+            </button>`,
+        )}
+      </nav>`,
+    dialog,
+  );
+  dialog.addEventListener('cancel', (event) => {
+    event.preventDefault();
+    close();
+  });
+  dialog.addEventListener('click', (event) => {
+    const rect = dialog.getBoundingClientRect();
+    if (
+      event.target === dialog &&
+      (event.clientX < rect.left ||
+        event.clientX > rect.right ||
+        event.clientY < rect.top ||
+        event.clientY > rect.bottom)
+    )
+      close();
+  });
+  document.body.append(dialog);
+  dialog.showModal();
 }
 function openGuideModal(guideId = null, previousActiveElement = document.activeElement) {
   let dialog = document.querySelector('dialog.guide-modal');
@@ -622,16 +673,12 @@ function startDaysPractice(mode = state.daysMode || 'first10') {
     exceptions: 'Månadens dagar: Alla undantag',
     all: 'Månadens dagar: Hela månaden (1–31)',
   };
-  session = createSession(
-    ids,
-    titles[mode] || 'Månadens dagar',
-    {
-      loopErrors: true,
-      daysMode: mode,
-      topic: 'Dagar',
-      failedLoopIds: [],
-    },
-  );
+  session = createSession(ids, titles[mode] || 'Månadens dagar', {
+    loopErrors: true,
+    daysMode: mode,
+    topic: 'Dagar',
+    failedLoopIds: [],
+  });
   persist(true);
   render(true);
 }
@@ -885,7 +932,9 @@ async function next() {
       if (session.revealed) delete session.revealed[id];
       session.ids.push(id);
     }
-    announce(`Repetition: ${toRepeat.length} dag${toRepeat.length > 1 ? 'ar' : ''} att prova igen!`);
+    announce(
+      `Repetition: ${toRepeat.length} dag${toRepeat.length > 1 ? 'ar' : ''} att prova igen!`,
+    );
     jump(session.index + 1);
     return;
   }
