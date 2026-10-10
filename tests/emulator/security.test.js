@@ -134,7 +134,8 @@ test('lobbies: only participants can update, outsiders are rejected', async () =
   // Alice creates lobby as host
   await assertSucceeds(
     setDoc(doc(a, 'lobbies/lobby1'), {
-      protocolVersion: 2,
+      protocolVersion: 3,
+      start: { version: 0, phase: 'waiting' },
       gameRevision: 0,
       game: null,
       host: { uid: 'alice' },
@@ -160,8 +161,8 @@ test('lobbies: only participants can update, outsiders are rejected', async () =
     }),
   );
 
-  // Participants can update their game
-  await assertSucceeds(
+  // Even the host cannot bypass the preparation protocol
+  await assertFails(
     updateDoc(doc(a, 'lobbies/lobby1'), {
       status: 'playing',
       gameRevision: 1,
@@ -198,7 +199,8 @@ test('lobbies 10-players: enforces max 10 player capacity and allows individual 
   // Host creates lobby with 1 player
   await assertSucceeds(
     setDoc(doc(host, 'lobbies/party1'), {
-      protocolVersion: 2,
+      protocolVersion: 3,
+      start: { version: 0, phase: 'waiting' },
       gameRevision: 0,
       game: null,
       host: { uid: 'host1' },

@@ -73,6 +73,8 @@ function trackBrowserHealth(clients) {
       if (response.status() >= 400)
         networkErrors.push(
           (async () => ({
+            client,
+            commit: response.request().postDataJSON(),
             url: response.url(),
             status: response.status(),
             body: await response.json().catch(() => null),
@@ -89,6 +91,25 @@ function trackBrowserHealth(clients) {
         // A receipt appeared after reduction read that document as missing.
         expect(failure.body?.error.status).toBe('ALREADY_EXISTS');
         expect(failure.body.error.message).toMatch(/entity already exists:.*\/answers\//);
+      } else if (failure.status === 403) {
+        // Firestore can evaluate startup rules against a winning transition
+        // before reporting the losing optimistic transaction's precondition.
+        // Accept only a startup write whose actual durable version has won.
+        expect(failure.body?.error.status).toBe('PERMISSION_DENIED');
+        const write = failure.commit?.writes?.find((w) => w.update?.fields?.start);
+        expect(write?.currentDocument?.updateTime).toBeTruthy();
+        expect(write.update.name).toMatch(/\/lobbies\/[^/]+$/);
+        const proposed = write.update.fields.start.mapValue.fields;
+        expect(['countdown', 'confirmed']).toContain(proposed.phase.stringValue);
+        const lobby = await read(failure.client, 'lobbies', write.update.name.split('/').at(-1));
+        expect(lobby.start.version).toBe(Number(proposed.version.integerValue));
+        expect(lobby.start.phase).toBe('confirmed');
+        expect(lobby.gameRevision).toBeGreaterThanOrEqual(
+          Number(write.update.fields.gameRevision.integerValue),
+        );
+        expect(Object.keys(lobby.start.entered).sort()).toEqual(
+          Object.keys(lobby.start.sessions).sort(),
+        );
       } else {
         expect(failure.status).toBe(400);
         expect(failure.body?.error.status).toBe('FAILED_PRECONDITION');
@@ -99,7 +120,7 @@ function trackBrowserHealth(clients) {
       errors.filter(
         (error) =>
           !(
-            /Failed to load resource:.*(400|409)/.test(error.text) &&
+            /Failed to load resource:.*(400|403|409)/.test(error.text) &&
             conflicts.some((conflict) => conflict.url === error.url)
           ),
       ),
@@ -120,13 +141,24 @@ test('receipt contention: five fresh ten-client matches retain ten real simultan
       for (const client of clients) uids.push(await login(client));
       const code = await create(clients[0]);
       for (const client of clients.slice(1)) await join(client, code);
-      await clients[0].getByRole('button', { name: 'Starta matchen!' }).click();
+      await Promise.all(clients.map(observeFirstEnabled));
+      await clients[0].getByRole('button', { name: 'Starta matchen!' }).evaluate((button) => {
+        button.click();
+        button.click();
+      });
       await Promise.all(
         clients.map((client) =>
-          expect(client.locator('.choices-grid button').first()).toBeEnabled(),
+          expect(client.locator('.choices-grid button').first()).toBeEnabled({ timeout: 35000 }),
         ),
       );
-      const question = (await read(clients[0], 'lobbies', code)).game.questions[0];
+      const startTimes = await Promise.all(
+        clients.map((client) => client.evaluate(() => window.firstEnabledAt)),
+      );
+      expect(Math.max(...startTimes) - Math.min(...startTimes)).toBeLessThanOrEqual(500);
+      const startingLobby = await read(clients[0], 'lobbies', code);
+      expect(startingLobby.start.version).toBe(1);
+      expect(startingLobby.start.phase).toBe('confirmed');
+      const question = startingLobby.game.questions[0];
       const results = await Promise.all(
         clients.map((client, i) =>
           client.evaluate(
@@ -309,7 +341,7 @@ test('a three-player tie shows a loss to third place', async ({ page, browser },
     await join(second, code);
     await join(third, code);
     await page.getByRole('button', { name: 'Starta matchen!' }).click();
-    await expect(third.locator('.round-badge')).toBeVisible();
+    await expect(third.locator('.choices-grid button').first()).toBeEnabled({ timeout: 35000 });
     await page.evaluate(
       async ({ code, ids }) => {
         const { db } = await import('/src/cloud.js');
@@ -366,7 +398,7 @@ test('remaining players finish a round after the host leaves', async ({ page, br
     await join(second, code);
     await join(third, code);
     await page.getByRole('button', { name: 'Starta matchen!' }).click();
-    await expect(third.locator('.round-badge')).toBeVisible();
+    await expect(third.locator('.choices-grid button').first()).toBeEnabled({ timeout: 35000 });
     await page
       .getByRole('button', { name: 'Plugga', exact: true })
       .filter({ visible: true })
@@ -399,7 +431,7 @@ test('final round timeout records a draw for both players, including legacy prof
     const code = await create(page);
     await join(guest, code);
     await page.getByRole('button', { name: 'Starta matchen!' }).click();
-    await expect(guest.locator('.round-badge')).toBeVisible();
+    await expect(guest.locator('.choices-grid button').first()).toBeEnabled({ timeout: 35000 });
     await page.evaluate(
       async ({ code, hostUid }) => {
         const { db } = await import('/src/cloud.js');
@@ -448,7 +480,8 @@ test('stale rooms cannot hide a fresh room and rooms expire without a new snapsh
         ids.forEach((id, i) =>
           batch.set(doc(db, 'lobbies', id), {
             id,
-            protocolVersion: 2,
+            protocolVersion: 3,
+            start: { version: 0, phase: 'waiting' },
             gameRevision: 0,
             status: 'waiting',
             category: 'particles',
@@ -495,7 +528,7 @@ test('leaving a live match records a forfeit, and leaving a waiting room removes
     const code = await create(page);
     await join(guest, code);
     await page.getByRole('button', { name: 'Starta matchen!' }).click();
-    await expect(guest.locator('.round-badge')).toBeVisible();
+    await expect(guest.locator('.choices-grid button').first()).toBeEnabled({ timeout: 35000 });
     await page
       .getByRole('button', { name: 'Plugga', exact: true })
       .filter({ visible: true })
@@ -842,7 +875,7 @@ test('presence: interrupted match keeps its deadline, then forfeits the absent p
     const code = await create(page);
     await join(guest, code);
     await page.getByRole('button', { name: 'Starta matchen!' }).click();
-    await expect(guest.locator('.round-badge')).toBeVisible();
+    await expect(guest.locator('.choices-grid button').first()).toBeEnabled({ timeout: 35000 });
     const before = await read(page, 'lobbies', code);
     // Known local network loss is shown immediately; short recovery is not a forfeit.
     await guest.context().setOffline(true);
@@ -888,5 +921,218 @@ test('presence: stale host closes the waiting view without unregistering a newer
     expect((await read(guest, 'lobbies', code)).players[uid]).toBeTruthy();
   } finally {
     await guest.close();
+  }
+});
+
+// Delay only subscription delivery; Firestore writes, rules and transaction
+// responses remain real. No view callback or saved game state is replaced.
+async function delayLobbySubscription(page) {
+  await page.route('**/src/multiplayer-transport.js', async (route) => {
+    const response = await route.fetch();
+    const source = await response.text();
+    await route.fulfill({
+      response,
+      body: source.replace(
+        'receive, onError);',
+        `snapshot => {
+        const delay = window.startDeliveryDelay;
+        const data = snapshot.data();
+        if (delay && (!delay.phase || data?.start?.phase === delay.phase)) {
+          window.delayedStartDeliveries = (window.delayedStartDeliveries || 0) + 1;
+          setTimeout(() => { window.releasedStartDeliveries = (window.releasedStartDeliveries || 0) + 1; receive(snapshot); }, delay.ms);
+        } else receive(snapshot);
+      }, onError);`,
+      ),
+    });
+  });
+}
+
+async function observeFirstEnabled(page) {
+  await page.evaluate(() => {
+    window.firstEnabledAt = null;
+    const check = () => {
+      if (window.firstEnabledAt == null && document.querySelector('.choices-grid button:enabled'))
+        window.firstEnabledAt = Date.now();
+    };
+    const observer = new MutationObserver(check);
+    observer.observe(document.body, { subtree: true, childList: true, attributes: true });
+  });
+}
+
+test('startup: host subscription delayed 13s still starts locally and stale snapshots cannot rewind', async ({
+  page,
+  browser,
+}) => {
+  const guest = await browser.newPage();
+  const healthy = trackBrowserHealth([page, guest]);
+  try {
+    await delayLobbySubscription(page);
+    await login(page);
+    await login(guest);
+    const code = await create(page);
+    await join(guest, code);
+    await expect(page.getByRole('button', { name: 'Starta matchen!' })).toBeEnabled();
+    await Promise.all([observeFirstEnabled(page), observeFirstEnabled(guest)]);
+    await page.evaluate(() => {
+      window.startDeliveryDelay = { ms: 13000 };
+    });
+    await page.getByRole('button', { name: 'Starta matchen!' }).click();
+    await expect(page.locator('.choices-grid button').first()).toBeEnabled({ timeout: 15000 });
+    await expect(guest.locator('.choices-grid button').first()).toBeEnabled();
+    const times = await Promise.all(
+      [page, guest].map((p) => p.evaluate(() => window.firstEnabledAt)),
+    );
+    expect(Math.abs(times[0] - times[1])).toBeLessThanOrEqual(500);
+    expect(await page.evaluate(() => window.delayedStartDeliveries)).toBeGreaterThan(0);
+    expect((await read(guest, 'lobbies', code)).start.phase).toBe('confirmed');
+    await expect
+      .poll(() => page.evaluate(() => window.releasedStartDeliveries || 0), { timeout: 15000 })
+      .toBeGreaterThan(0);
+    await expect(page.locator('.round-badge')).toHaveText('Fråga 1 / 10');
+    await expect(page.locator('.choices-grid button').first()).toBeEnabled();
+    await page.screenshot({ path: path.join(os.tmpdir(), 'tentaplugg-start-host.png') });
+    await healthy();
+  } finally {
+    await guest.close();
+  }
+});
+
+test('startup: late guest schedule cancels without scores or ELO and permits a fresh version', async ({
+  page,
+  browser,
+}) => {
+  const guest = await browser.newPage();
+  const healthy = trackBrowserHealth([page, guest]);
+  let delayedNetwork = 0,
+    releasedNetwork = 0;
+  try {
+    const uid = await login(page);
+    await delayLobbySubscription(guest);
+    const guestUid = await login(guest);
+    const code = await create(page);
+    await join(guest, code);
+    await guest.evaluate(() => {
+      window.startDeliveryDelay = { ms: 13000, phase: 'countdown' };
+    });
+    // The helper transaction is a second delivery path; delay that same server
+    // state too, otherwise its confirmed response correctly bypasses the delay.
+    await guest.route('**/documents:batchGet**', async (route) => {
+      const response = await route.fetch();
+      const body = await response.text();
+      if (/"stringValue"\s*:\s*"countdown"/.test(body)) {
+        delayedNetwork++;
+        await new Promise((resolve) => setTimeout(resolve, 13000));
+        releasedNetwork++;
+      }
+      await route.fulfill({ response, body });
+    });
+    await guest.route('**/documents:commit**', async (route) => {
+      const response = await route.fetch();
+      if ((route.request().postData() || '').includes('countdown')) {
+        delayedNetwork++;
+        await new Promise((resolve) => setTimeout(resolve, 13000));
+        releasedNetwork++;
+      }
+      await route.fulfill({ response });
+    });
+    await page.getByRole('button', { name: 'Starta matchen!' }).click();
+    await expect(
+      page.getByText('Alla deltagare kunde inte förbereda starten i tid. Försök igen.'),
+    ).toBeVisible({ timeout: 15000 });
+    const cancelled = await read(page, 'lobbies', code);
+    expect(cancelled.game).toBeNull();
+    expect(cancelled.start.version).toBe(1);
+    for (const id of [uid, guestUid])
+      expect((await read(page, 'leaderboard', id)).matchesPlayed).toBe(0);
+    await guest.unroute('**/documents:batchGet**');
+    await guest.unroute('**/documents:commit**');
+    await guest.evaluate(() => {
+      window.startDeliveryDelay = null;
+    });
+    await page.getByRole('button', { name: 'Starta matchen!' }).click();
+    await expect(guest.locator('.choices-grid button').first()).toBeEnabled({ timeout: 15000 });
+    expect((await read(page, 'lobbies', code)).start.version).toBe(2);
+    await expect
+      .poll(
+        async () =>
+          releasedNetwork + (await guest.evaluate(() => window.releasedStartDeliveries || 0)),
+        { timeout: 15000 },
+      )
+      .toBeGreaterThan(0);
+    await expect(guest.locator('.choices-grid button').first()).toBeEnabled();
+    await guest.locator('.choices-grid button').first().click();
+    await expect(guest.locator('.answer-delivery-status')).toContainText('Svar mottaget.');
+    expect(delayedNetwork).toBeGreaterThan(0);
+    await healthy();
+  } finally {
+    await guest.close();
+  }
+});
+
+test('startup: missing preparation times out within 30s and host can cancel and retry', async ({
+  page,
+  browser,
+}) => {
+  const guest = await browser.newPage();
+  try {
+    await login(page);
+    await delayLobbySubscription(guest);
+    await login(guest);
+    const code = await create(page);
+    await join(guest, code);
+    await guest.evaluate(() => {
+      window.startDeliveryDelay = { ms: 35000, phase: 'preparing' };
+    });
+    await page.getByRole('button', { name: 'Starta matchen!' }).click();
+    await expect(page.getByRole('heading', { name: 'Förbereder matchen…' })).toBeVisible();
+    await expect(page.getByText('1 / 2 deltagare', { exact: false })).toBeVisible();
+    await page.screenshot({ path: path.join(os.tmpdir(), 'tentaplugg-start-preparing.png') });
+    await page.getByRole('button', { name: 'Avbryt starten' }).click();
+    await expect(page.getByText('Starten avbröts. Försök igen.')).toBeVisible();
+    await page.getByRole('button', { name: 'Starta matchen!' }).click();
+    await expect(
+      page.getByText('Alla deltagare kunde inte förbereda starten i tid. Försök igen.'),
+    ).toBeVisible({ timeout: 32000 });
+    const data = await read(page, 'lobbies', code);
+    expect(data.game).toBeNull();
+    expect(data.start.version).toBe(2);
+  } finally {
+    await guest.close();
+  }
+});
+
+test('startup: disconnected guest during preparation cancels without a match result', async ({
+  page,
+  browser,
+  request,
+}) => {
+  const guest = await browser.newPage();
+  const healthy = trackBrowserHealth([page, guest]);
+  try {
+    const hostUid = await login(page);
+    await delayLobbySubscription(guest);
+    const uid = await login(guest);
+    const code = await create(page);
+    await join(guest, code);
+    await guest.evaluate(() => {
+      window.startDeliveryDelay = { ms: 35000, phase: 'preparing' };
+    });
+    await page.getByRole('button', { name: 'Starta matchen!' }).click();
+    await expect(page.getByRole('heading', { name: 'Förbereder matchen…' })).toBeVisible();
+    await guest.close();
+    await expirePresence(request, code, uid);
+    await expect(
+      page.getByText('Alla deltagare kunde inte förbereda starten i tid. Försök igen.'),
+    ).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Starta matchen!' })).toBeDisabled();
+    expect((await read(page, 'lobbies', code)).game).toBeNull();
+    for (const id of [hostUid, uid])
+      expect((await read(page, 'leaderboard', id)).matchesPlayed).toBe(0);
+    expect(await page.title()).toMatch(/TentaPlugg/i);
+    expect(page.url()).toContain('http://127.0.0.1:5175/');
+    await expect(page.locator('vite-error-overlay')).toHaveCount(0);
+    await healthy();
+  } finally {
+    if (!guest.isClosed()) await guest.close();
   }
 });

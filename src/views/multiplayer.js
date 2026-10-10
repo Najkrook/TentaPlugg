@@ -7,6 +7,8 @@ import {
   joinLobby,
   leaveLobby,
   startMatch,
+  acknowledgeMatchStart,
+  progressMatchStart,
   submitAnswer,
   advanceRoundIfDue,
   sendHeartbeat,
@@ -57,11 +59,16 @@ let currentViewContext = null;
 let lifecycleRegistered = false;
 let lastTimerMonotonic = 0;
 let answerAttempt = null;
+let startBusy = false;
+let preparedVersion = null;
+let enteredVersion = null;
 
 export function resetMultiplayerView(uid = null) {
   const leaving = activeLobbyId && uid ? leaveLobby(activeLobbyId, uid) : Promise.resolve();
   viewEpoch++;
   answerAttempt = null;
+  preparedVersion = null;
+  enteredVersion = null;
   if (lobbyUnsub) {
     lobbyUnsub();
     lobbyUnsub = null;
@@ -91,6 +98,57 @@ export function resetMultiplayerView(uid = null) {
   return leaving;
 }
 
+// Monotonic lobby revisions also cover locally returned transaction results.
+function acceptLobbyData(data) {
+  if (!data || (currentLobbyData && data.gameRevision < currentLobbyData.gameRevision)) return;
+  currentLobbyData = { ...data, presence: data.presence || currentLobbyData?.presence || {} };
+}
+
+async function prepareStart(ctx) {
+  if (startBusy || !activeLobbyId || !currentLobbyData?.start || locallyOffline) return;
+  const observed = currentLobbyData;
+  const version = observed.start.version;
+  if (!['preparing', 'countdown'].includes(observed.start.phase)) return;
+  startBusy = true;
+  const epoch = viewEpoch,
+    code = activeLobbyId;
+  const accept = (data) => {
+    if (epoch === viewEpoch && code === activeLobbyId) acceptLobbyData(data);
+  };
+  try {
+    if (observed.start.phase === 'preparing' && preparedVersion !== version) {
+      const clock = await synchronizeMultiplayerClock(db, activeUserUid, { force: true });
+      if (epoch !== viewEpoch) return;
+      if (!clock.valid) {
+        accept(await progressMatchStart(code, version));
+        return;
+      }
+      const data = await acknowledgeMatchStart(code, activeUserUid, observed);
+      if (
+        epoch === viewEpoch &&
+        data?.start?.version === version &&
+        data.start.prepared?.[activeUserUid]
+      )
+        preparedVersion = version;
+      accept(data);
+    } else if (observed.start.phase === 'countdown' && !observed.start.entered[activeUserUid]) {
+      const clock = getMultiplayerClock(db);
+      if (clock.valid && clock.now + clock.uncertainty < observed.game.roundStartTime) {
+        enteredVersion = version;
+        ctx.render();
+      }
+      const data = await acknowledgeMatchStart(code, activeUserUid, observed, 'entered');
+      accept(data);
+    }
+    accept(await progressMatchStart(code, version));
+  } catch (error) {
+    if (epoch === viewEpoch) feedbackMessage = error.message || 'Kunde inte förbereda starten';
+  } finally {
+    startBusy = false;
+    if (epoch === viewEpoch) ctx.render();
+  }
+}
+
 function watchLobby(ctx, code) {
   lobbyUnsub?.();
   const epoch = viewEpoch;
@@ -102,7 +160,7 @@ function watchLobby(ctx, code) {
         resetMultiplayerView();
         feedbackMessage = 'Lobbyn har stängts.';
       } else {
-        currentLobbyData = data;
+        acceptLobbyData(data);
       }
       ctx.render();
     },
@@ -201,6 +259,7 @@ export function multiplayerView(ctx) {
           .catch(() => {});
       }
 
+      prepareStart(ctx);
       const game = currentLobbyData?.game;
       const now = getMultiplayerNow();
       if (
@@ -221,6 +280,7 @@ export function multiplayerView(ctx) {
       if (
         game &&
         game.status !== 'finished' &&
+        currentLobbyData.start?.phase === 'confirmed' &&
         clockSnapshot.valid &&
         getActivePlayerUids(game).some(
           (uid) => !isPlayerPresent(currentLobbyData, uid, now - clockSnapshot.uncertainty),
@@ -288,6 +348,36 @@ export function multiplayerView(ctx) {
     currentLobbyData.protocolVersion !== MATCH_PROTOCOL_VERSION
   ) {
     return html`<p role="alert">Uppdatera sidan för att använda matchens protokoll.</p>`;
+  }
+
+  if (currentLobbyData.status === 'preparing') {
+    return html`<div class="waiting-card card">
+      <h2>Förbereder matchen…</h2>
+      <p role="status">
+        ${Object.keys(currentLobbyData.start.prepared).length} /
+        ${currentLobbyData.game.playerUids.length} deltagare har förberett matchen. Väntar högst 30
+        sekunder.
+      </p>
+      ${
+        currentLobbyData.host.uid === user.uid
+          ? html`<button
+              class="secondary"
+              @click=${async () => {
+                const code = activeLobbyId,
+                  epoch = viewEpoch;
+                const data = await progressMatchStart(code, currentLobbyData.start.version, true);
+                if (epoch === viewEpoch && code === activeLobbyId) {
+                  acceptLobbyData(data);
+                  ctx.render();
+                }
+              }}
+            >
+              Avbryt starten
+            </button>`
+          : ''
+      }
+      ${feedbackMessage ? html`<p role="alert">${feedbackMessage}</p>` : ''}
+    </div>`;
   }
 
   if (currentLobbyData.status === 'waiting') {
@@ -767,18 +857,31 @@ function waitingRoomView(ctx) {
         }
 
         <div class="waiting-actions">
+          ${currentLobbyData.start?.reason ? html`<p role="status">${currentLobbyData.start.reason}</p>` : ''}
           ${feedbackMessage ? html`<p class="feedback-msg" role="alert">${feedbackMessage}</p>` : ''}
           ${
             isHost
               ? html`
                   <button
                     class="primary start-btn"
-                    ?disabled=${!canStart}
+                    ?disabled=${!canStart || lobbyBusy}
                     @click=${async () => {
                       try {
-                        await startMatch(activeLobbyId);
+                        if (lobbyBusy) return;
+                        lobbyBusy = true;
+                        const epoch = viewEpoch,
+                          code = activeLobbyId;
+                        ctx.render();
+                        const data = await startMatch(code);
+                        if (epoch === viewEpoch && code === activeLobbyId) {
+                          acceptLobbyData(data);
+                          feedbackMessage = '';
+                          prepareStart(ctx);
+                        }
                       } catch (err) {
                         feedbackMessage = err.message || 'Kunde inte starta';
+                      } finally {
+                        lobbyBusy = false;
                         ctx.render();
                       }
                     }}
@@ -825,6 +928,7 @@ function isCurrentAttempt(attempt) {
     attempt.epoch === viewEpoch &&
     attempt.lobbyId === activeLobbyId &&
     attempt.uid === activeUserUid &&
+    currentLobbyData?.game?.startVersion === attempt.startVersion &&
     currentLobbyData?.game?.currentRoundIndex === attempt.roundIndex
   );
 }
@@ -853,6 +957,7 @@ async function deliverAnswer(attempt, ctx) {
       attempt.roundIndex,
       attempt.choice,
       attempt.id,
+      attempt.startVersion,
     );
     if (!isCurrentAttempt(attempt)) return;
     if (
@@ -883,7 +988,9 @@ function arenaView(ctx) {
   const now = getMultiplayerNow();
   // Ready countdown ONLY applies to round 0 before the roundStartTime
   const isCountdown =
-    game.currentRoundIndex === 0 && Boolean(game.roundStartTime) && now < game.roundStartTime;
+    game.currentRoundIndex === 0 &&
+    Boolean(game.roundStartTime) &&
+    (now < game.roundStartTime || enteredVersion !== game.startVersion);
   const countdownSec = Math.max(
     1,
     Math.min(3, Math.ceil(((game.roundStartTime || now) - now) / 1000)),
@@ -1078,6 +1185,7 @@ function arenaView(ctx) {
                           id: crypto.randomUUID(),
                           choice,
                           roundIndex: roundIdx,
+                          startVersion: game.startVersion,
                           lobbyId: activeLobbyId,
                           uid: user.uid,
                           epoch: viewEpoch,

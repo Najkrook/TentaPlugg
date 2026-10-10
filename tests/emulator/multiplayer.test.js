@@ -48,7 +48,24 @@ before(async () => {
 });
 after(async () => env?.cleanup());
 
-async function match(count) {
+async function completeStart(code, users, as, database) {
+  await as(0, () => mp.startMatch(code));
+  const read = async () => (await getDoc(doc(database, 'lobbies', code))).data();
+  for (let i = 0; i < users.length; i++) {
+    const observed = await read();
+    await as(i, () => mp.acknowledgeMatchStart(code, users[i].uid, observed));
+  }
+  const version = (await read()).start.version;
+  await as(0, () => mp.progressMatchStart(code, version));
+  for (let i = 0; i < users.length; i++) {
+    const observed = await read();
+    await as(i, () => mp.acknowledgeMatchStart(code, users[i].uid, observed, 'entered'));
+  }
+  await as(0, () => mp.progressMatchStart(code, version));
+  assert.equal((await read()).start.phase, 'confirmed');
+}
+
+async function match(count, start = true) {
   const prefix = `arena-${++sequence}`;
   const users = Array.from({ length: count }, (_, i) => ({
     uid: `${prefix}-${i}`,
@@ -61,7 +78,7 @@ async function match(count) {
   }
   const code = await as(0, () => mp.createLobby(users[0], 'particles'));
   for (let i = 1; i < count; i++) await as(i, () => mp.joinLobby(code, users[i]));
-  await as(0, () => mp.startMatch(code));
+  if (start) await completeStart(code, users, as, databases[0]);
   const ref = doc(databases[0], 'lobbies', code);
   return {
     code,
@@ -210,7 +227,8 @@ test('receipt rules bind owner, version, round, identity, choice and immutable s
   const database = env.authenticatedContext(m.users[0].uid).firestore();
   const ref = doc(database, 'lobbies', m.code, 'answers', `0_${m.users[0].uid}`);
   const raw = {
-    protocolVersion: 2,
+    protocolVersion: 3,
+    startVersion: 1,
     uid: m.users[0].uid,
     roundIndex: 0,
     answer: 'A',
@@ -463,6 +481,8 @@ test('clock quality enforcement blocks uncalibrated or invalidated matches and a
   assert.equal(await as(0, () => mp.isMultiplayerClockValid(databases[0])), true);
   await as(0, () => mp.startMatch(code));
 
+  await completeStart(code, users, as, databases[0]);
+
   // Match started
   const game = (await getDoc(doc(databases[0], 'lobbies', code))).data().game;
   assert.equal(game.status, 'playing');
@@ -563,8 +583,7 @@ test('concurrent expiry forfeits once, continues with two and finishes with one'
 });
 
 test('expired waiting guest cannot satisfy start requirement; expired host rejects joins', async () => {
-  const m = await match(2);
-  await m.update({ status: 'waiting', game: null });
+  const m = await match(2, false);
   await agePresence(m, 1, 46000);
   await assert.rejects(() => m.as(0, () => mp.startMatch(m.code)), /minst en till/);
   await m.as(1, () => mp.connectPlayerPresence(m.code, m.users[1].uid));
@@ -573,8 +592,7 @@ test('expired waiting guest cannot satisfy start requirement; expired host rejec
 });
 
 test('a stale waiting guest is excluded when two present players start', async () => {
-  const m = await match(3);
-  await m.update({ status: 'waiting', game: null });
+  const m = await match(3, false);
   await agePresence(m, 1, 46000);
   await m.as(0, () => mp.startMatch(m.code));
   const lobby = await m.read();
@@ -591,7 +609,8 @@ async function seedReceipt(m, player, round, time, patch = {}) {
     setDoc(
       doc(context.firestore(), 'lobbies', m.code, 'answers', `${round}_${m.users[player].uid}`),
       {
-        protocolVersion: 2,
+        protocolVersion: 3,
+        startVersion: 1,
         uid: m.users[player].uid,
         roundIndex: round,
         answer: question.correctAnswer,
@@ -602,3 +621,114 @@ async function seedReceipt(m, player, round, time, patch = {}) {
     ),
   );
 }
+
+test('startup binds acknowledgements to owner, content, version, clock and connection', async () => {
+  const m = await match(2, false);
+  const prepared = await m.as(0, () => mp.startMatch(m.code));
+  await m.as(0, () => mp.acknowledgeMatchStart(m.code, m.users[0].uid, prepared));
+  await m.as(0, () => mp.progressMatchStart(m.code, 1));
+  assert.equal((await m.read()).status, 'preparing');
+  await m.as(1, () =>
+    mp.acknowledgeMatchStart(m.code, m.users[1].uid, {
+      ...prepared,
+      game: { ...prepared.game, questions: [] },
+    }),
+  );
+  assert.equal(Object.keys((await m.read()).start.prepared).length, 1);
+  const database = env.authenticatedContext(m.users[1].uid).firestore();
+  const ref = doc(database, 'lobbies', m.code);
+  const forged = (uid, patch = {}) => ({
+    [`start.prepared.${uid}`]: {
+      sessionId: prepared.start.sessions[uid],
+      at: serverTimestamp(),
+      uncertainty: 10,
+      ...patch,
+    },
+    gameRevision: increment(1),
+    gameUpdatedAt: serverTimestamp(),
+  });
+  await assertFails(updateDoc(ref, forged(m.users[0].uid)));
+  await assertFails(updateDoc(ref, forged(m.users[1].uid, { sessionId: 'old-session' })));
+  await assertFails(updateDoc(ref, forged(m.users[1].uid, { uncertainty: 251 })));
+  await assertFails(updateDoc(ref, forged(m.users[1].uid, { at: Timestamp.fromMillis(1) })));
+  await assertFails(
+    updateDoc(ref, {
+      'start.phase': 'confirmed',
+      gameRevision: increment(1),
+      gameUpdatedAt: serverTimestamp(),
+    }),
+  );
+  await m.as(1, () => mp.acknowledgeMatchStart(m.code, m.users[1].uid, prepared));
+  await m.as(0, () => mp.progressMatchStart(m.code, 1, true));
+  await m.as(0, () => mp.startMatch(m.code));
+  await m.as(1, () => mp.acknowledgeMatchStart(m.code, m.users[1].uid, prepared));
+  const retry = await m.read();
+  assert.equal(retry.start.version, 2);
+  assert.deepEqual(retry.start.prepared, {});
+  await m.as(0, () => mp.progressMatchStart(m.code, 1, true));
+  assert.equal((await m.read()).start.phase, 'preparing');
+  for (let i = 0; i < 2; i++) assert.equal((await m.profile(i)).matchesPlayed, 0);
+});
+
+test('startup concurrent host clicks create only one version and guests cannot initiate', async () => {
+  const m = await match(2, false);
+  await assert.rejects(() => m.as(1, () => mp.startMatch(m.code)));
+  await Promise.all([m.as(0, () => mp.startMatch(m.code)), m.as(0, () => mp.startMatch(m.code))]);
+  assert.equal((await m.read()).start.version, 1);
+});
+
+test('startup expired participant and preparation timeout cancel without forfeit or ELO', async () => {
+  for (const expiredPresence of [true, false]) {
+    const m = await match(2, false);
+    await m.as(0, () => mp.startMatch(m.code));
+    if (expiredPresence) await agePresence(m, 1, 46000);
+    else
+      await env.withSecurityRulesDisabled((context) =>
+        updateDoc(doc(context.firestore(), 'lobbies', m.code), {
+          'start.createdAt': Timestamp.fromMillis(Date.now() - 31000),
+        }),
+      );
+    await m.as(0, () => mp.progressMatchStart(m.code, 1));
+    const saved = await m.read();
+    assert.equal(saved.status, 'waiting');
+    assert.equal(saved.game, null);
+    for (let i = 0; i < 2; i++) assert.equal((await m.profile(i)).matchesPlayed, 0);
+  }
+});
+
+test('startup missing countdown acknowledgement cannot accept answers or award ELO', async () => {
+  const m = await match(2, false);
+  await m.as(0, () => mp.startMatch(m.code));
+  const observed = await m.read();
+  for (let i = 0; i < 2; i++)
+    await m.as(i, () => mp.acknowledgeMatchStart(m.code, m.users[i].uid, observed));
+  await m.as(0, () => mp.progressMatchStart(m.code, 1));
+  await env.withSecurityRulesDisabled((context) =>
+    updateDoc(doc(context.firestore(), 'lobbies', m.code), {
+      'game.roundStartTime': Date.now() - 1000,
+    }),
+  );
+  const late = await m.read();
+  await m.as(1, () => mp.acknowledgeMatchStart(m.code, m.users[1].uid, late, 'entered'));
+  assert.deepEqual((await m.read()).start.entered, {});
+  await m.as(0, () => mp.advanceRoundIfDue(m.code));
+  assert.equal((await m.profile(0)).matchesPlayed, 0);
+  await m.as(0, () => mp.progressMatchStart(m.code, 1));
+  assert.equal((await m.read()).game, null);
+});
+
+test('startup explicit departure cancels preparation and removes the departing participant', async () => {
+  for (const leaving of [0, 1]) {
+    const m = await match(2, false);
+    await m.as(0, () => mp.startMatch(m.code));
+    await m.as(leaving, () => mp.leaveLobby(m.code, m.users[leaving].uid));
+    const saved = await m.read();
+    if (leaving === 0) assert.equal(saved, undefined);
+    else {
+      assert.equal(saved.status, 'waiting');
+      assert.equal(saved.playerCount, 1);
+      assert.equal(saved.players[m.users[1].uid], undefined);
+    }
+    for (let i = 0; i < 2; i++) assert.equal((await m.profile(i)).matchesPlayed, 0);
+  }
+});

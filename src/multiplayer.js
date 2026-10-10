@@ -2,6 +2,7 @@ import {
   doc,
   collection,
   setDoc,
+  increment,
   onSnapshot,
   query,
   where,
@@ -12,6 +13,7 @@ import {
   getDocFromServer,
 } from 'firebase/firestore';
 import { db } from './cloud.js';
+import { observeLobby } from './multiplayer-transport.js';
 import {
   multiplayerNow,
   synchronizeMultiplayerClock,
@@ -47,7 +49,144 @@ export const MAX_PLAYERS = 10;
 export const MIN_PLAYERS = 2;
 export const HEARTBEAT_TTL_MS = 45000; // 45s heartbeat timeout for lobbies
 export const IDLE_ROUND_TIME_MS = 60000;
-export const MATCH_PROTOCOL_VERSION = 2;
+export const MATCH_PROTOCOL_VERSION = 3;
+export const START_PREPARATION_MS = 30000;
+export const START_COUNTDOWN_MS = 3000;
+
+function answerDocumentId(game, round, uid) {
+  return `${game.startVersion > 1 ? `${game.startVersion}_` : ''}${round}_${uid}`;
+}
+
+function cancelledStart(data, reason) {
+  return {
+    status: 'waiting',
+    game: null,
+    start: { ...data.start, phase: 'waiting', reason },
+    players: Object.fromEntries(
+      Object.entries(data.players).map(([uid, p]) => [uid, { ...p, score: 0 }]),
+    ),
+    gameRevision: data.gameRevision + 1,
+    gameUpdatedAt: serverTimestamp(),
+  };
+}
+
+// Confirm only content already delivered to this client. A fresh read
+// must never silently acknowledge a newer version than the view has prepared.
+export async function acknowledgeMatchStart(lobbyId, uid, observed, stage = 'prepared') {
+  const database = db;
+  const sessionId = sessions(database).get(`${lobbyId}/${uid}`);
+  const ref = doc(database, 'lobbies', lobbyId);
+  const data = (await getDocFromServer(ref)).data();
+  const clock = getMultiplayerClock(database);
+  if (
+    !data ||
+    !clock.valid ||
+    data.start.version !== observed.start.version ||
+    data.start.sessions?.[uid] !== sessionId ||
+    JSON.stringify(data.game?.questions) !== JSON.stringify(observed.game?.questions)
+  )
+    return data;
+  const phase = stage === 'prepared' ? 'preparing' : 'countdown';
+  if (data.start.phase !== phase || data.start[stage][uid]) return data;
+  if (stage === 'entered' && clock.now + clock.uncertainty >= data.game.roundStartTime) return data;
+  try {
+    // Blind field transforms avoid lobby retries. A unary transaction also
+    // avoids a persistent write stream per client (WebKit connection limit).
+    // Rules bind the update to the observed version and this participant only.
+    await runTransaction(database, async (tx) => {
+      tx.update(ref, {
+        'start.version': observed.start.version,
+        [`start.${stage}.${uid}`]: {
+          sessionId,
+          at: serverTimestamp(),
+          uncertainty: clock.uncertainty,
+        },
+        gameRevision: increment(1),
+        gameUpdatedAt: serverTimestamp(),
+      });
+    });
+  } catch (error) {
+    const latest = (await getDocFromServer(ref)).data();
+    if (
+      error.code !== 'permission-denied' ||
+      (latest?.start?.version === observed.start.version &&
+        latest.start.phase === phase &&
+        !latest.start[stage][uid])
+    )
+      throw error;
+  }
+  return (await getDocFromServer(ref)).data();
+}
+
+// Every participant may help complete or cancel a stalled preparation. There is
+// no scoring finalization until every client has received the scheduled start.
+export async function progressMatchStart(lobbyId, version, cancel = false) {
+  const database = db;
+  const ref = doc(database, 'lobbies', lobbyId);
+  let attemptedRevision;
+  return runTransaction(database, async (tx) => {
+    const data = (await tx.get(ref)).data();
+    if (
+      !data ||
+      data.start?.version !== version ||
+      !['preparing', 'countdown'].includes(data.start.phase)
+    )
+      return data;
+    attemptedRevision = data.gameRevision;
+    const clock = getMultiplayerClock(database);
+    if (!clock.valid || cancel) {
+      const patch = cancelledStart(
+        data,
+        cancel ? 'Starten avbröts. Försök igen.' : 'Klockan kunde inte synkroniseras. Försök igen.',
+      );
+      tx.update(ref, patch);
+      return { ...data, ...patch };
+    }
+    const presence = await readPresence(tx, database, lobbyId, data);
+    const uids = data.game.playerUids;
+    const expired = uids.some(
+      (uid) =>
+        !isPlayerPresent({ ...data, presence }, uid, clock.now - clock.uncertainty) ||
+        presence[uid]?.sessionId !== data.start.sessions[uid],
+    );
+    const timedOut =
+      clock.now - clock.uncertainty >= data.start.createdAt.toMillis() + START_PREPARATION_MS;
+    const missedStart =
+      data.start.phase === 'countdown' &&
+      clock.now - clock.uncertainty >= data.game.roundStartTime &&
+      !uids.every((uid) => data.start.entered[uid]);
+    let patch;
+    if (cancel || expired || timedOut || missedStart) {
+      patch = cancelledStart(
+        data,
+        cancel
+          ? 'Starten avbröts. Försök igen.'
+          : 'Alla deltagare kunde inte förbereda starten i tid. Försök igen.',
+      );
+    } else if (data.start.phase === 'preparing' && uids.every((uid) => data.start.prepared[uid])) {
+      patch = {
+        status: 'playing',
+        start: { ...data.start, phase: 'countdown' },
+        game: { ...data.game, status: 'playing', roundStartTime: clock.now + START_COUNTDOWN_MS },
+        gameRevision: data.gameRevision + 1,
+        gameUpdatedAt: serverTimestamp(),
+      };
+    } else if (data.start.phase === 'countdown' && uids.every((uid) => data.start.entered[uid])) {
+      patch = {
+        start: { ...data.start, phase: 'confirmed' },
+        gameRevision: data.gameRevision + 1,
+        gameUpdatedAt: serverTimestamp(),
+      };
+    } else return { ...data, presence };
+    tx.update(ref, patch);
+    return { ...data, ...patch, presence };
+  }).catch(async (error) => {
+    if (error.code !== 'permission-denied') throw error;
+    const latest = (await getDocFromServer(ref)).data();
+    if (latest?.gameRevision > attemptedRevision) return latest;
+    throw error;
+  });
+}
 
 function requireCurrentProtocol(lobby) {
   if (lobby.protocolVersion !== MATCH_PROTOCOL_VERSION)
@@ -118,7 +257,13 @@ export async function expireDisconnectedPlayers(lobbyId) {
     const changed = await runTransaction(database, async (tx) => {
       const snap = await tx.get(ref);
       const data = snap.data();
-      if (!data?.presenceVersion || !data.game || data.game.status === 'finished') return false;
+      if (
+        !data?.presenceVersion ||
+        !data.game ||
+        data.game.status === 'finished' ||
+        data.start?.phase !== 'confirmed'
+      )
+        return false;
       const presence = await readPresence(tx, database, lobbyId, data);
       const clock = getMultiplayerClock(database);
       if (!clock.valid) return false;
@@ -808,6 +953,7 @@ export async function createLobby(user, category) {
     id: code,
     protocolVersion: MATCH_PROTOCOL_VERSION,
     gameRevision: 0,
+    start: { version: 0, phase: 'waiting' },
     presenceVersion: 1,
     category,
     status: 'waiting',
@@ -982,6 +1128,18 @@ export async function leaveLobby(lobbyId, uid) {
       const isPlayer = Boolean(data.players?.[uid] || data.guest?.uid === uid || isHost);
       if (!isPlayer) return;
 
+      if (data.start?.phase === 'preparing' || data.start?.phase === 'countdown') {
+        const patch = cancelledStart(data, 'En deltagare lämnade. Försök igen.');
+        if (isHost) tx.delete(lobbyRef);
+        else {
+          delete patch.players[uid];
+          patch.playerCount = Object.keys(patch.players).length;
+          patch.guest = Object.values(patch.players).find((p) => p.uid !== data.host.uid) || null;
+          tx.update(lobbyRef, patch);
+        }
+        return;
+      }
+
       // If in progress or finished, forfeiting or exiting
       if (data.game && data.game.status !== 'finished' && data.status !== 'waiting') {
         await applyForfeitInTransaction(tx, lobbyRef, data, uid, getMultiplayerNow());
@@ -1018,19 +1176,22 @@ export async function leaveLobby(lobbyId, uid) {
 }
 
 /**
- * Starts match by initializing 10 questions and starting countdown.
+ * Prepares ten questions; every participant must acknowledge before countdown.
  * Host can start match as soon as at least 2 players have joined.
  */
 export async function startMatch(lobbyId) {
-  const lobbyRef = doc(db, 'lobbies', lobbyId);
-  return runTransaction(db, async (tx) => {
+  const database = db;
+  let attemptedVersion;
+  const lobbyRef = doc(database, 'lobbies', lobbyId);
+  return runTransaction(database, async (tx) => {
     const snap = await tx.get(lobbyRef);
     if (!snap.exists()) throw new Error('Lobbyn finns inte');
     const data = snap.data();
     requireCurrentProtocol(data);
-    if (data.status !== 'waiting') return data.game;
+    attemptedVersion = data.start.version;
+    if (data.status !== 'waiting') return data;
 
-    const clock = getMultiplayerClock(db);
+    const clock = getMultiplayerClock(database);
     if (!clock.valid) {
       throw new Error('Kunde inte starta: matchklockan är inte synkroniserad');
     }
@@ -1044,7 +1205,7 @@ export async function startMatch(lobbyId) {
       }),
     };
 
-    const presence = await readPresence(tx, db, lobbyId, data);
+    const presence = await readPresence(tx, database, lobbyId, data);
     if (!isPlayerPresent({ ...data, presence }, data.host.uid))
       throw new Error('Värden är inte längre ansluten');
     for (const uid of Object.keys(playersMap)) {
@@ -1075,7 +1236,8 @@ export async function startMatch(lobbyId) {
       protocolVersion: MATCH_PROTOCOL_VERSION,
       questions: questionsList,
       currentRoundIndex: 0,
-      roundStartTime: now + 3000, // 3s countdown before first round
+      roundStartTime: null,
+      startVersion: (data.start?.version || 0) + 1,
       firstAnswerAt: null,
       roundDeadline: null,
       hostUid: data.host.uid,
@@ -1087,11 +1249,22 @@ export async function startMatch(lobbyId) {
       answers: {},
       roundWinners: {},
       roundWinner: null,
-      status: 'playing',
+      status: 'preparing',
     };
 
-    tx.update(lobbyRef, {
-      status: 'playing',
+    const patch = {
+      status: 'preparing',
+      start: {
+        version: game.startVersion,
+        phase: 'preparing',
+        createdAt: serverTimestamp(),
+        sessions: Object.fromEntries(
+          Object.keys(playersMap).map((uid) => [uid, presence[uid].sessionId]),
+        ),
+        prepared: {},
+        entered: {},
+        reason: '',
+      },
       gameRevision: data.gameRevision + 1,
       gameUpdatedAt: serverTimestamp(),
       players: playersMap,
@@ -1099,8 +1272,15 @@ export async function startMatch(lobbyId) {
       guest: playersMap[guestUid] || null,
       game,
       updatedAt: now,
-    });
-    return game;
+    };
+    tx.update(lobbyRef, patch);
+    return { ...data, ...patch, presence };
+  }).catch(async (error) => {
+    if (error.code !== 'permission-denied') throw error;
+    const latest = (await getDocFromServer(lobbyRef)).data();
+    // Rules can see a competing start before Firestore reports the conflict.
+    if (latest?.start?.version > attemptedVersion) return latest;
+    throw error;
   });
 }
 
@@ -1122,6 +1302,7 @@ export function summarizeRoundReceipts(game, receipts, now, playersMap = null, c
       (r) =>
         r &&
         r.protocolVersion === MATCH_PROTOCOL_VERSION &&
+        r.startVersion === game.startVersion &&
         r.roundIndex === round &&
         game.playerUids.includes(r.uid) &&
         r.receivedAt?.toMillis() >= game.roundStartTime,
@@ -1170,7 +1351,15 @@ export function summarizeRoundReceipts(game, receipts, now, playersMap = null, c
 async function readRoundReceipts(tx, database, lobbyId, game) {
   const snapshots = await Promise.all(
     game.playerUids.map((uid) =>
-      tx.get(doc(database, 'lobbies', lobbyId, 'answers', `${game.currentRoundIndex}_${uid}`)),
+      tx.get(
+        doc(
+          database,
+          'lobbies',
+          lobbyId,
+          'answers',
+          answerDocumentId(game, game.currentRoundIndex, uid),
+        ),
+      ),
     ),
   );
   return snapshots.map((snap) => snap.data()).filter(Boolean);
@@ -1187,9 +1376,20 @@ export async function submitPlayerAnswer(
   roundIndex,
   selectedAnswer,
   attemptId = crypto.randomUUID(),
+  expectedStartVersion = null,
 ) {
   const database = db;
-  const answerRef = doc(database, 'lobbies', lobbyId, 'answers', `${roundIndex}_${uid}`);
+  const initial = (await getDocFromServer(doc(database, 'lobbies', lobbyId))).data();
+  if (!initial?.game) return { status: 'closed' };
+  const startVersion = expectedStartVersion ?? initial.game.startVersion;
+  if (initial.game.startVersion !== startVersion) return { status: 'stale-round' };
+  const answerRef = doc(
+    database,
+    'lobbies',
+    lobbyId,
+    'answers',
+    answerDocumentId(initial.game, roundIndex, uid),
+  );
   const lobbyRef = doc(database, 'lobbies', lobbyId);
   let status;
   try {
@@ -1206,8 +1406,10 @@ export async function submitPlayerAnswer(
       if (!isMultiplayerClockValid(database))
         return { status: 'rejected', reason: 'clock-invalid' };
       if (game.currentRoundIndex !== roundIndex) return { status: 'stale-round' };
-      if (game.status !== 'playing') return { status: 'closed' };
+      if (game.status !== 'playing' || data.start.phase !== 'confirmed')
+        return { status: 'closed' };
       if (
+        game.startVersion !== startVersion ||
         !getActivePlayerUids(game).includes(uid) ||
         multiplayerNow(database) < game.roundStartTime
       )
@@ -1215,6 +1417,7 @@ export async function submitPlayerAnswer(
       // An unsummarized first receipt near 60s can extend the window by eight seconds.
       tx.set(answerRef, {
         protocolVersion: MATCH_PROTOCOL_VERSION,
+        startVersion,
         uid,
         roundIndex,
         answer: selectedAnswer,
@@ -1262,7 +1465,7 @@ async function reconcileMatch(lobbyId, database, retries = MAX_PLAYERS * 2) {
       attemptedRevision = data.gameRevision;
       requireCurrentProtocol(data);
       const game = data.game;
-      if (game.status === 'finished') return game;
+      if (game.status === 'finished' || data.start?.phase !== 'confirmed') return game;
       const clock = getMultiplayerClock(database);
       if (!clock.valid) throw new Error('Matchklockan behöver synkroniseras före sammanställning');
       // Closing must not run ahead of server time within clock uncertainty.
@@ -1476,6 +1679,7 @@ export function subscribeToLobby(lobbyId, callback, onError) {
                 lobby.game?.status === 'playing' &&
                 receipts.some(
                   (r) =>
+                    r.startVersion === lobby.game.startVersion &&
                     r.roundIndex === lobby.game.currentRoundIndex &&
                     !lobby.game.answers?.[r.roundIndex]?.[r.uid],
                 ),
@@ -1504,9 +1708,8 @@ export function subscribeToLobby(lobbyId, callback, onError) {
     },
     onError,
   );
-  const stopLobby = onSnapshot(
+  const stopLobby = observeLobby(
     doc(db, 'lobbies', lobbyId),
-    { includeMetadataChanges: true },
     (snap) => {
       if (snap.metadata.hasPendingWrites) return;
       lobby = snap.exists() ? snap.data() : null;
