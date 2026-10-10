@@ -93,7 +93,9 @@ const studyNavs = [
   ['vocabulary', 'BookOpen', 'Ordförråd (Genki)'],
   ['particles', 'CircleHelp', 'Partikelguide'],
 ];
-const mobileNavs = navs.filter(([id]) => id !== 'multiplayer');
+const mobileNavs = ['home', 'exams', 'progress', 'multiplayer'].map((id) =>
+  navs.find(([navId]) => navId === id),
+);
 function announce(text) {
   message = text;
   render();
@@ -483,7 +485,7 @@ function render(focus = false) {
         </footer>
       </div>
       <nav class="mobile-nav" aria-label="Huvudmeny">
-        ${mobileNavs.map(([id, i, l]) => html`<button class=${view === id ? 'active' : ''} @click=${() => navigate(id)}>${icon(i)}<span>${id === 'progress' ? 'Framsteg' : id === 'exams' ? 'Tentor' : l}</span></button>`)}
+        ${mobileNavs.map(([id, i, l]) => html`<button class=${view === id ? 'active' : ''} @click=${() => navigate(id)}>${icon(i)}<span>${id === 'progress' ? 'Framsteg' : id === 'exams' ? 'Tentor' : id === 'multiplayer' ? '1v1' : l}</span></button>`)}
         <button
           class=${mobileNavs.some(([id]) => id === view) ? '' : 'active'}
           aria-haspopup="dialog"

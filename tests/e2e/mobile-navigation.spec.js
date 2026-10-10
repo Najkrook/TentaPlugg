@@ -8,6 +8,21 @@ test('mobile navigation reaches every sidebar destination', async ({ page }) => 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');
   await expect(page).toHaveTitle(/TentaPlugg/);
+  const bottomNav = page.locator('.mobile-nav');
+  await expect(bottomNav.getByRole('button')).toHaveText([
+    'Plugga',
+    'Tentor',
+    'Framsteg',
+    '1v1',
+    'Mer',
+  ]);
+  await bottomNav.getByRole('button', { name: '1v1', exact: true }).click();
+  await expect(page).toHaveURL(/\/multiplayer$/);
+  await expect(bottomNav.getByRole('button', { name: '1v1', exact: true })).toHaveClass('active');
+  await bottomNav.getByRole('button', { name: 'Mer', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Snabbguide', exact: true }).click();
+  await expect(page).toHaveURL(/\/guide$/);
+  await expect(bottomNav.getByRole('button', { name: 'Mer', exact: true })).toHaveClass('active');
   const destinations = await page.locator('.sidebar .nav-item').allTextContents();
   await page.locator('.mobile-nav').getByRole('button', { name: 'Mer', exact: true }).click();
   const menu = page.getByRole('dialog', { name: 'Alla sidor' });

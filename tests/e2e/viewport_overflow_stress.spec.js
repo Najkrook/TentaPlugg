@@ -60,6 +60,11 @@ async function navigateTo(page, target) {
     home: 'Plugga',
   };
   const name = labelMap[target];
+  if (isMobile && target === 'guide') {
+    await page.locator('.mobile-nav').getByRole('button', { name: 'Mer', exact: true }).click();
+    await page.getByRole('dialog').getByRole('button', { name, exact: true }).click();
+    return;
+  }
   await page.getByRole('button', { name, exact: true }).filter({ visible: true }).click();
 }
 
