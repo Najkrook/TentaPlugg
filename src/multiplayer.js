@@ -1314,10 +1314,7 @@ export function summarizeRoundReceipts(game, receipts, now, playersMap = null, c
     );
   const first = ordered[0]?.receivedAt.toMillis();
   const firstAnswerAt = first < game.roundStartTime + IDLE_ROUND_TIME_MS ? first : null;
-  const deadline =
-    firstAnswerAt == null
-      ? game.roundStartTime + IDLE_ROUND_TIME_MS
-      : firstAnswerAt + ROUND_TIME_MS;
+  const deadline = getRoundDeadline({ ...game, firstAnswerAt });
   const answers = {};
   let winner = null;
   for (const receipt of ordered) {

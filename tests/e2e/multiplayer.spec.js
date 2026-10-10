@@ -959,6 +959,222 @@ async function observeFirstEnabled(page) {
   });
 }
 
+// Delay real finalization writes, while receipts and clock/presence writes
+// continue to reach the emulator unchanged.
+async function delayRoundEndCommits(page, milliseconds) {
+  let delayed = 0;
+  await page.route(/\/documents:commit(?:\?|$)/, async (route) => {
+    const writes = route.request().postDataJSON()?.writes || [];
+    if (
+      writes.some(
+        (write) =>
+          write.update?.fields?.game?.mapValue?.fields?.status?.stringValue === 'round_end',
+      )
+    ) {
+      delayed++;
+      await new Promise((resolve) => setTimeout(resolve, milliseconds));
+    }
+    await route.continue();
+  });
+  return () => delayed;
+}
+
+async function observeRoundFeedback(page) {
+  await page.evaluate(() => {
+    window.roundFeedback = [];
+    const observer = new MutationObserver(() => {
+      const text = document.querySelector('.round-end-banner')?.textContent;
+      if (text) window.roundFeedback.push(text);
+    });
+    observer.observe(document.querySelector('main'), {
+      subtree: true,
+      childList: true,
+      characterData: true,
+    });
+  });
+}
+
+test('visible deadline: no answers shows sixty seconds, pending result, then one timeout each', async ({
+  page,
+  browser,
+}, testInfo) => {
+  test.setTimeout(110000);
+  const guest = await browser.newPage();
+  const healthy = trackBrowserHealth([page, guest]);
+  try {
+    const hostUid = await login(page);
+    const guestUid = await login(guest);
+    expect(new URL(page.url()).origin).toBe('http://127.0.0.1:5175');
+    await expect(page).toHaveTitle(/TentaPlugg/i);
+    const code = await create(page);
+    await join(guest, code);
+    await page.getByRole('button', { name: 'Starta matchen!' }).click();
+    await expect(page.locator('.arena-countdown-overlay')).toBeVisible();
+    await expect(page.getByRole('timer')).toHaveText(/Inväntar matchstart/);
+    await expect(page.locator('.choices-grid button').first()).toBeEnabled();
+    await expect(page.getByRole('timer')).toHaveText(/(60|59)s kvar/);
+    await expect(page.locator('.round-time-status')).toContainText('60 sekunder');
+    await expect(page.getByRole('timer')).toHaveAttribute('aria-live', 'off');
+    await observeRoundFeedback(page);
+    await page.screenshot({
+      path: path.join(os.tmpdir(), `deadline-initial-${testInfo.project.name}.png`),
+    });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+    const delayed = await delayRoundEndCommits(page, 3000);
+    await delayRoundEndCommits(guest, 3000);
+    await expect(page.getByRole('timer')).toHaveText(/\b0s kvar/, { timeout: 65000 });
+    await expect(page.locator('.round-time-status')).toHaveText(
+      'Svarstiden är slut. Hämtar resultat…',
+    );
+    await expect(page.locator('.choices-grid button:enabled')).toHaveCount(0);
+    await expect(page.locator('.round-end-banner')).toHaveCount(0);
+    expect(delayed()).toBeGreaterThan(0);
+    expect(await page.locator('.timer-fill').evaluate((el) => el.style.width)).toBe('0%');
+    // A delayed commit may consume the result pause before delivery. Record
+    // every rendered result rather than sampling past a short banner.
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() =>
+            window.roundFeedback.some((text) => text.includes('Tiden ute! (-50p)')),
+          ),
+        { timeout: 15000 },
+      )
+      .toBe(true);
+    const saved = await read(page, 'lobbies', code);
+    for (const uid of [hostUid, guestUid]) {
+      expect(saved.game.answers[0][uid]).toMatchObject({ timedOut: true, pointsAwarded: -50 });
+      expect(saved.game.scores[uid]).toBe(-50);
+    }
+    await expect(page.locator('.round-badge')).toHaveText('Fråga 2 / 10');
+    expect((await read(page, 'lobbies', code)).game.scores).toEqual(saved.game.scores);
+    await expect(page.locator('vite-error-overlay')).toHaveCount(0);
+    await healthy();
+  } finally {
+    await guest.unrouteAll({ behavior: 'wait' });
+    await guest.close();
+  }
+});
+
+test('visible deadline: late first receipt opens eight seconds and delayed reduction never shows false timeout', async ({
+  page,
+  browser,
+}, testInfo) => {
+  test.setTimeout(115000);
+  const guest = await browser.newPage();
+  const healthy = trackBrowserHealth([page, guest]);
+  try {
+    await delayLobbySubscription(page);
+    const hostUid = await login(page);
+    const guestUid = await login(guest);
+    const code = await create(page);
+    await join(guest, code);
+    await page.getByRole('button', { name: 'Starta matchen!' }).click();
+    await expect(page.locator('.choices-grid button').first()).toBeEnabled();
+    const initial = await read(page, 'lobbies', code);
+    const answer = initial.game.questions[0].correctAnswer;
+    await expect(guest.getByRole('timer')).toHaveText(/\b2s kvar/, { timeout: 65000 });
+    // Host receives the real first-answer snapshot one second late.
+    await page.evaluate(() => {
+      window.startDeliveryDelay = { ms: 1000 };
+      window.deadlineSamples = [];
+      window.deadlineObserver = new MutationObserver(() => {
+        window.deadlineSamples.push(document.querySelector('[role="timer"]')?.textContent.trim());
+      });
+      window.deadlineObserver.observe(document.querySelector('.arena-header'), {
+        subtree: true,
+        childList: true,
+        characterData: true,
+      });
+    });
+    await guest.locator('.choice-btn').filter({ hasText: answer }).click();
+    await expect(guest.getByRole('timer')).toHaveText(/\b8s kvar/);
+    await expect(page.locator('.round-time-status')).toContainText('8 sekunder');
+    const received = await read(page, 'lobbies', code);
+    expect(received.game.firstAnswerAt - initial.game.roundStartTime).toBeGreaterThan(57000);
+    expect(received.game.roundDeadline - received.game.firstAnswerAt).toBe(8000);
+    await expect(page.getByRole('timer')).toHaveText(/\b5s kvar/);
+    const samples = await page.evaluate(() => {
+      window.deadlineObserver.disconnect();
+      return window.deadlineSamples;
+    });
+    expect(samples.some((text) => /(^|\s)0s kvar|−\d|-[0-9]/.test(text))).toBe(false);
+    await expect(page.locator('.choices-grid button').first()).toBeEnabled();
+    expect(
+      await page.locator('.timer-fill').evaluate((el) => parseFloat(el.style.width)),
+    ).toBeGreaterThan(40);
+    await page.screenshot({
+      path: path.join(os.tmpdir(), `deadline-extended-${testInfo.project.name}.png`),
+    });
+    await delayRoundEndCommits(page, 8000);
+    await delayRoundEndCommits(guest, 8000);
+    await observeRoundFeedback(page);
+    await page.locator('.choice-btn').filter({ hasText: answer }).click();
+    await expect(page.locator('.answer-delivery-status')).toContainText('Skickar svar');
+    await expect(page.getByRole('timer')).toHaveText(/\b0s kvar/, { timeout: 8000 });
+    await expect(page.locator('.round-time-status')).toContainText('Hämtar resultat');
+    await expect(page.locator('.round-end-banner')).toHaveCount(0);
+    await expect
+      .poll(
+        () => page.evaluate(() => window.roundFeedback.some((text) => text.includes('Rätt svar!'))),
+        { timeout: 15000 },
+      )
+      .toBe(true);
+    expect(
+      await page.evaluate(() => window.roundFeedback.some((text) => text.includes('Tiden ute!'))),
+    ).toBe(false);
+    const saved = await read(page, 'lobbies', code);
+    for (const uid of [hostUid, guestUid]) {
+      expect(saved.game.answers[0][uid].isCorrect).toBe(true);
+      expect(saved.game.answers[0][uid].timedOut).toBeUndefined();
+    }
+    expect(saved.game.answers[0][hostUid].timestamp).toBeGreaterThan(
+      initial.game.roundStartTime + 60000,
+    );
+    await healthy();
+  } finally {
+    await guest.unrouteAll({ behavior: 'wait' });
+    await guest.close();
+  }
+});
+
+test('visible deadline: uncertain clock hides exact time and preserves a confirmed answer', async ({
+  page,
+  browser,
+}, testInfo) => {
+  const guest = await browser.newPage();
+  const healthy = trackBrowserHealth([page, guest]);
+  try {
+    await login(page);
+    await login(guest);
+    const code = await create(page);
+    await join(guest, code);
+    await page.getByRole('button', { name: 'Starta matchen!' }).click();
+    await expect(page.locator('.choices-grid button').first()).toBeEnabled();
+    const answer = (await read(page, 'lobbies', code)).game.questions[0].correctAnswer;
+    await page.locator('.choice-btn').filter({ hasText: answer }).click();
+    await expect(page.locator('.answer-delivery-status')).toHaveText('Svar mottaget.');
+    await page.evaluate(async () => {
+      const { db } = await import('/src/cloud.js');
+      const { invalidateMultiplayerClock } = await import('/src/multiplayer.js');
+      invalidateMultiplayerClock(db, 'test-uncertain');
+    });
+    await expect(page.getByRole('timer')).toHaveText(/Omsynkroniserar/);
+    await expect(page.getByRole('timer')).not.toHaveText(/\d+s kvar/);
+    await expect(page.locator('.answer-delivery-status')).toHaveText('Svar mottaget.');
+    await expect(page.locator('.btn-correct')).toBeVisible();
+    await expect(page.locator('.choices-grid button:enabled')).toHaveCount(0);
+    await page.screenshot({
+      path: path.join(os.tmpdir(), `deadline-uncertain-${testInfo.project.name}.png`),
+    });
+    await healthy();
+  } finally {
+    await guest.close();
+  }
+});
+
 test('startup: host subscription delayed 13s still starts locally and stale snapshots cannot rewind', async ({
   page,
   browser,

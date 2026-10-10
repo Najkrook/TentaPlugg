@@ -29,6 +29,7 @@ import {
   isRoundExpired,
   DEFAULT_ELO,
   ROUND_TIME_MS,
+  IDLE_ROUND_TIME_MS,
   TIMEOUT_PENALTY,
   MAX_PLAYERS,
   MIN_PLAYERS,
@@ -1037,17 +1038,24 @@ function arenaView(ctx) {
   const myScore = (user?.uid && scores[user.uid]) || 0;
   const leader = sortedStandings[0] || { displayName: 'Ingen', score: 0 };
 
-  // Timer calculation: 8-second countdown begins ONLY when the first player answers
-  const hasFirstAnswer = Boolean(game.firstAnswerAt);
-  let timePercent = 100;
-  let remainingSec = 8;
-  if (hasFirstAnswer) {
-    const elapsed = Math.max(0, now - game.firstAnswerAt);
-    timePercent = Math.max(0, Math.min(100, 100 - (elapsed / ROUND_TIME_MS) * 100));
-    remainingSec = Math.max(0, Math.ceil((ROUND_TIME_MS - elapsed) / 1000));
-  }
-
   const myClock = getMultiplayerClock(db);
+  const hasFirstAnswer = game.firstAnswerAt != null;
+  const windowMs = hasFirstAnswer ? ROUND_TIME_MS : IDLE_ROUND_TIME_MS;
+  const remainingMs = Math.max(0, Math.min(windowMs, getRoundDeadline(game) - now));
+  const remainingSec = Math.ceil(remainingMs / 1000);
+  const showTime = myClock.valid && !isCountdown && game.status === 'playing';
+  const expired = isRoundExpired(game, now);
+  const timerStatus = !myClock.valid
+    ? 'Omsynkroniserar matchklockan…'
+    : isCountdown
+      ? 'Inväntar matchstart'
+      : game.status !== 'playing'
+        ? 'Rundan avslutad'
+        : expired
+          ? 'Svarstiden är slut. Hämtar resultat…'
+          : hasFirstAnswer
+            ? 'Svarsfönster: 8 sekunder från första mottagna svaret.'
+            : 'Svarsfönster: 60 sekunder från rundans start.';
 
   return html`
     <div class="multiplayer-container arena-container">
@@ -1085,9 +1093,12 @@ function arenaView(ctx) {
           <div class="round-status-row">
             <span class="round-badge">Fråga ${roundIdx + 1} / 10</span>
             <span
-              class="timer-countdown-badge ${hasFirstAnswer ? 'active-countdown' : 'waiting-answer'}"
+              class="timer-countdown-badge ${showTime && hasFirstAnswer && !expired ? 'active-countdown' : 'waiting-answer'}"
+              role="timer"
+              aria-live="off"
+              aria-label=${showTime ? `${remainingSec} sekunder kvar. ${timerStatus}` : timerStatus}
             >
-              ${icon('Clock')} ${hasFirstAnswer ? `${remainingSec}s kvar` : 'Väntar på svar...'}
+              ${icon('Clock')} ${showTime ? `${remainingSec}s kvar` : timerStatus}
             </span>
             <span class="answered-badge ${answeredCount === totalPlayers ? 'all-answered' : ''}">
               ${icon('Users')} ${answeredCount}/${totalPlayers} svarat
@@ -1096,7 +1107,7 @@ function arenaView(ctx) {
           <div class="timer-track" aria-hidden="true">
             <div
               class="timer-fill ${hasFirstAnswer ? 'timer-running' : 'timer-idle'}"
-              style="width: ${game.status === 'playing' ? (hasFirstAnswer ? timePercent : 100) : 0}%;"
+              style="width: ${showTime ? (remainingMs / windowMs) * 100 : 0}%;"
             ></div>
           </div>
         </div>
@@ -1108,13 +1119,14 @@ function arenaView(ctx) {
           <div class="arena-score">${(leader.score || 0).toLocaleString('sv-SE')}p</div>
         </div>
       </header>
+      <p class="round-time-status" role="status">${timerStatus}</p>
 
       ${
         isCountdown
           ? html`
               <div class="arena-countdown-overlay card">
                 <span class="countdown-label">Gör dig redo!</span>
-                <div class="countdown-number">${countdownSec}</div>
+                <div class="countdown-number">${myClock.valid ? countdownSec : '…'}</div>
                 <p>Snabbaste korrekta svaren ger upp till 1 000 poäng. Fel svar ger −250p!</p>
               </div>
             `
@@ -1229,7 +1241,7 @@ function arenaView(ctx) {
                         : html`<strong class="winner-self"
                             >${icon('Check')} Rätt svar! (+${myAnswer.pointsAwarded}p)</strong
                           >`
-                      : myAnswer?.timedOut || !myAnswer?.answer
+                      : myAnswer?.timedOut
                         ? html`<strong class="winner-opp"
                             >${icon('Clock')} Tiden ute! (${TIMEOUT_PENALTY}p)</strong
                           >`
@@ -1238,7 +1250,7 @@ function arenaView(ctx) {
                               >${icon('X')} Fel svar! (${myAnswer.pointsAwarded}p)</strong
                             >`
                           : html`<strong class="winner-opp"
-                              >${icon('Clock')} Tiden ute! (${TIMEOUT_PENALTY}p)</strong
+                              >${icon('Clock')} Hämtar ditt resultat…</strong
                             >`
                   }
                 </div>

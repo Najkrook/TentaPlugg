@@ -21,6 +21,8 @@ import {
   closeRound,
   getRoundDeadline,
   isRoundExpired,
+  summarizeRoundReceipts,
+  MATCH_PROTOCOL_VERSION,
 } from '../src/multiplayer.js';
 
 test('round deadline switches from the idle limit to a full first-answer window', () => {
@@ -43,6 +45,44 @@ test('round deadline switches from the idle limit to a full first-answer window'
   assert.notEqual(evaluateRound(answered, 'b', 'A', 67999), answered);
   assert.equal(isRoundExpired(answered, 68000), true);
   assert.equal(evaluateRound(answered, 'b', 'A', 68000), answered);
+});
+
+test('receipt reduction and answer gating agree before, on and after both deadlines', () => {
+  for (const firstAnswerAt of [null, 59999]) {
+    const game = {
+      status: 'playing',
+      currentRoundIndex: 0,
+      roundStartTime: 0,
+      startVersion: 1,
+      playerUids: ['a', 'b'],
+      scores: { a: 0, b: 0 },
+      answers: {},
+      questions: [{ correctAnswer: 'A' }],
+      firstAnswerAt,
+    };
+    const receipt = (uid, time) => ({
+      uid,
+      answer: 'A',
+      roundIndex: 0,
+      startVersion: 1,
+      protocolVersion: MATCH_PROTOCOL_VERSION,
+      receivedAt: { toMillis: () => time },
+    });
+    const deadline = getRoundDeadline(game);
+    for (const offset of [-1, 0, 1]) {
+      const time = deadline + offset;
+      assert.equal(isRoundExpired(game, time), offset >= 0);
+      const receipts = firstAnswerAt == null ? [] : [receipt('a', firstAnswerAt)];
+      const result = summarizeRoundReceipts(
+        game,
+        [...receipts, receipt('b', time)],
+        time,
+        null,
+        false,
+      );
+      assert.equal(Boolean(result.answers[0].b), offset < 0);
+    }
+  }
 });
 
 test('ELO rating calculations match FIDE formulas', () => {

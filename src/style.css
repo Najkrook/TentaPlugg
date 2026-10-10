@@ -4897,8 +4897,26 @@ html:not([data-theme='sakura']) .sound-slider,
 }
 .round-status-row {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   align-items: center;
   gap: 10px;
+}
+.round-time-status {
+  text-align: center;
+  font-size: 14px;
+}
+@media (max-width: 600px) {
+  .arena-header {
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 16px;
+  }
+  .arena-round-indicator {
+    order: 1;
+    flex-basis: 100%;
+    padding: 0;
+  }
 }
 .round-badge {
   font-size: 13px;
