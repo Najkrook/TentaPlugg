@@ -1227,7 +1227,7 @@ export const l1l5Questions = [
     id: 'l1l5-g-11',
     topic: 'Grammatikteori',
     prompt: 'Ordering at a café/restaurant: コーヒーとケーキ【　】。',
-    answers: ['をおねがいします'],
+    answers: ['をおねがいします', 'をください'],
     choices: ['をおねがいします', 'をどうぞ', 'をください'],
     explanation:
       'Vid beställning av mat och dryck på restaurang eller kafé används vanligen ～をおねがいします (eller をください).',

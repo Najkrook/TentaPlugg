@@ -240,7 +240,7 @@ lesson.forEach(([p, a, e], i) =>
   ],
   [
     'Vilken räknare används för tunna, platta saker?',
-    '枚',
+    ['枚', 'まい'],
     '枚（まい）används för exempelvis papper och T-tröjor.',
   ],
 ].forEach(([p, a, e], i) =>
