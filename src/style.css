@@ -4876,29 +4876,41 @@ html:not([data-theme='sakura']) .sound-slider,
 /* Arena View */
 .arena-container {
   max-width: 680px;
+  gap: 18px;
 }
 .arena-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 24px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px 24px;
+  padding: 20px 24px;
 }
 .arena-player {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  min-width: 80px;
+  align-items: flex-start;
+  min-width: 0;
+  gap: 6px;
+}
+.arena-leader {
+  grid-column: 2;
+  grid-row: 1;
+  align-items: flex-end;
+  text-align: right;
 }
 .arena-player-label {
   font-size: 13px;
   font-weight: 600;
   color: var(--muted);
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 .arena-score {
-  font-size: 36px;
+  font-size: clamp(24px, 6vw, 32px);
   font-weight: 800;
   color: var(--green);
   line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
   transition: transform 0.2s cubic-bezier(0.18, 0.89, 0.32, 1.28);
 }
 .score-gain {
@@ -4920,31 +4932,43 @@ html:not([data-theme='sakura']) .sound-slider,
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
-  flex: 1;
-  padding: 0 16px;
+  grid-column: 1 / -1;
+  min-width: 0;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
 }
 .round-status-row {
   display: flex;
   flex-wrap: wrap;
-  justify-content: center;
+  justify-content: space-between;
   align-items: center;
-  gap: 10px;
+  width: 100%;
+  gap: 8px;
 }
 .round-time-status {
   text-align: center;
-  font-size: 14px;
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0;
 }
 @media (max-width: 600px) {
   .arena-header {
-    flex-wrap: wrap;
-    gap: 12px;
+    gap: 16px;
     padding: 16px;
   }
-  .arena-round-indicator {
-    order: 1;
-    flex-basis: 100%;
-    padding: 0;
+  .arena-container .question-card {
+    padding: 24px 16px;
+  }
+  .arena-container .question-prompt {
+    font-size: 22px;
+  }
+  .arena-container .choices-grid {
+    gap: 12px;
+  }
+  .arena-container .choice-btn {
+    padding: 16px 12px;
+    min-height: 88px;
   }
 }
 .round-badge {
@@ -4977,6 +5001,13 @@ html:not([data-theme='sakura']) .sound-slider,
   padding: 2px 8px;
   border-radius: 12px;
   transition: all 0.2s ease;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.round-status-row svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
 }
 .timer-countdown-badge.waiting-answer {
   background: #f1f3f2;
@@ -4999,8 +5030,7 @@ html:not([data-theme='sakura']) .sound-slider,
 }
 .timer-track {
   width: 100%;
-  max-width: 180px;
-  height: 8px;
+  height: 6px;
   background: var(--line);
   border-radius: 4px;
   overflow: hidden;
@@ -5103,27 +5133,27 @@ html:not([data-theme='sakura']) .sound-slider,
   color: #1a2f27;
   line-height: 1.6;
   white-space: pre-line;
+  overflow-wrap: anywhere;
 }
 .choices-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
   margin-top: 8px;
 }
-@media (max-width: 520px) {
-  .choices-grid {
-    grid-template-columns: 1fr;
-  }
-}
 .choice-btn {
   display: flex;
+  flex-direction: column;
+  gap: 8px;
   align-items: center;
   justify-content: center;
   position: relative;
   min-height: 68px;
+  min-width: 0;
   padding: 14px 20px;
   font-size: 18px;
   font-weight: 600;
+  color: var(--green);
   background: #ffffff;
   border: 2px solid var(--line);
   border-radius: 12px;
@@ -5141,11 +5171,11 @@ html:not([data-theme='sakura']) .sound-slider,
 }
 .choice-text {
   text-align: center;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 .choice-badge {
-  position: absolute;
-  top: -8px;
-  right: -8px;
+  position: static;
   background: #20552d;
   color: #ffffff;
   font-size: 12px;
