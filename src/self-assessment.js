@@ -1,5 +1,15 @@
 // Criteria elaborate the existing model answers; they never award points automatically.
 const criteria = {
+  'goto-mock-1.1': [
+    'Definiera och förklara de tre termerna: phonographic (ljud/mora-baserad), ideographic (betydelsebärande enheter) och pictographic (bildtecken).',
+    'Ge konkreta exempel på japanska tecken från varje skriftsystem (hiragana, katakana och kanji).',
+    'Beskriv vad respektive skriftsystem används till i modern japanska.',
+  ],
+  'goto-mock-1.2': [
+    'Förklara den historiska orsaken till varför kanji har flera läsningar (inlån från Kina till befintligt japanskt språk).',
+    'Namnge de två grupperna: On-yomi (音読み, kinesiskt ursprung) och Kun-yomi (訓読み, inhemskt japanskt ursprung).',
+    'Ange minst ett kanji-tecken från Genki-boken (t.ex. 山 eller 日) skrivet på japanska med dess olika läsningar och ordexempel.',
+  ],
   'gema70-2-4': [
     'Identifiera あの som demonstrativt bestämningsord framför ett substantiv.',
     'Jämför med tentans alternativ Pronoun och notera att den mer precisa termen kan skilja sig.',
@@ -131,7 +141,7 @@ export function selfAssessmentCriteria(q, fallback) {
 
 export function selfAssessmentGuide(q) {
   if (!q.self) return null;
-  if (/^(gema70-1\.[123]$|japc11-1\.[12]$)/.test(q.id)) return 'writing-systems';
+  if (/^(gema70-1\.[123]$|japc11-1\.[12]$|goto-mock-1\.[12]$)/.test(q.id)) return 'writing-systems';
   if (q.id === 'japc11-2') return 'word-origins';
   if (q.topic === 'Ordföljd' || q.id.startsWith('japc11-3.')) return 'sentence-parts';
   if (q.topic === 'Grammatikteori') return 'word-classes';

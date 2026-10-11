@@ -86,6 +86,9 @@ const syllables = {
   がっこう: 'がっ・こう',
   コーヒー: 'コー・ヒー',
   おさけ: 'お・さ・け',
+  ストックホルム: 'ス・トッ・ク・ホ・ル・ム',
+  しんじゅく: 'しん・じゅ・く',
+  コペンハーゲン: 'コ・ペン・ハー・ゲン',
 };
 
 const readingReasons = {
@@ -134,6 +137,25 @@ const wordReasons = {
   ありました: 'ありました är artig dåtid av あります och beskriver att något fanns.',
   わたし: 'わたし syftar på den som talar: jag.',
   せんこう: 'せんこう namnger här ett huvudämne eller studieinriktning.',
+  あそこ: 'あそこ är ett demonstrativt pronomen som syftar på en plats långt från både talare och lyssnare.',
+  しずか: 'しずか är stammen av na-adjektivet しずか（な） och beskriver en egenskap (lugn/tyst).',
+  で: 'で fungerar här som partikel och markerar handlingsplats eller medel.',
+  パン: 'パン betyder bröd och namnger en sak (substantiv).',
+  か: 'か markerar här att meningen är en fråga (frågepartikel).',
+  つめたい: 'つめたい är ett i-adjektiv som beskriver egenskapen kall (om dryck/beröring).',
+  がぶがぶ: 'がぶがぶ är en ideofon (ljudhärmande/onomatopoetiskt) som beskriver att dricka glupskt i stora klunkar.',
+  に: 'に fungerar här som partikel och anger en tidpunkt eller ett rörelsemål.',
+  きます: 'きます är artig presens av verbet くる (att komma) och uttrycker en handling.',
+  たかい: 'たかい är ett i-adjektiv som betyder dyr eller hög.',
+  です: 'です fungerar som kopula (predikatsled) och klassificeras i tentans terminologi under Verb.',
+  さつ: 'さつ är en räkneordsklassifikator (numerical classifier) för bundna föremål som böcker och häften.',
+  '２さつ': 'さつ är en räkneordsklassifikator (numerical classifier) för bundna föremål som böcker och häften.',
+  これ: 'これ är ett demonstrativt pronomen som syftar på något nära talaren.',
+  ざーざー: 'ざーざー är en ideofon som beskriver ljudet av kraftigt ösregn.',
+  がくせい: 'がくせい betyder student och namnger en person (substantiv).',
+  にん: 'にん är en räkneordsklassifikator (numerical classifier) för personer.',
+  '１０にん': 'にん är en räkneordsklassifikator (numerical classifier) för personer.',
+  よく: 'よく är ett frekvensadverb som anger att någon gör något ofta eller väl.',
 };
 
 const specificChecklists = {
@@ -148,6 +170,14 @@ const specificChecklists = {
   'gema70-1.3': [
     'Beskriv vad vart och ett av de tre skriftsystemen används till.',
     'Ge minst ett exempel per system och förklara varför exemplet passar.',
+  ],
+  'goto-mock-1.1': [
+    'Definiera phonographic, ideographic och pictograph och förklara skillnaden mellan ljudskrift och betydelsebärande tecken.',
+    'Ge japanska tecken som exempel för hiragana, katakana och kanji och beskriv vad de används till.',
+  ],
+  'goto-mock-1.2': [
+    'Namnge on-yomi och kun-yomi och förklara deras olika historiska och språkliga ursprung.',
+    'Ge minst ett kanji från Genki (t.ex. 山 eller 日) med dess olika läsningar i konkreta ord.',
   ],
   'japc11-1.1': [
     'Skriv 4–5 meningar på engelska.',

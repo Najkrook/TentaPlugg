@@ -258,6 +258,14 @@ export const exams = [
     points: 100,
   },
   {
+    id: 'goto-mock',
+    title: 'Goto-sensei Mocktenta',
+    subtitle: 'JAPC11/JAPD02 · Grammatik 1 模試',
+    description: 'Skriftsystem, ordklasser, partiklar, ordföljd och ljudsystem. Extratenta från Goto-sensei.',
+    pages: 6,
+    points: 100,
+  },
+  {
     id: 'japc11',
     title: 'JAPC11',
     subtitle: 'Grammatik 1 · oktober 2024',
@@ -484,6 +492,260 @@ sovG.forEach(([p, m], i) =>
     points: 1,
   }),
 );
+
+// Goto-mock (JAPC11/JAPD02 Grammatik 1 Mock tentan 模試, Natsumi Goto)
+eq(
+  'goto-mock',
+  '1.1',
+  1,
+  'Beskriv japanskans tre skriftsystem.\n• Förklara betydelsen av termerna i ditt svar.\n• Ge exempel på japanska tecken från varje skriftssystem i ditt svar.\nTermer: phonographic, ideographic, pictographic',
+  'Hiragana och katakana är fonografiska (phonographic): tecknen representerar språkljud (moror) snarare än betydelser. Hiragana används bl.a. för böjningsändelser och partiklar (t.ex. は、たべる); katakana för lånord och onomatopoetiska ord (t.ex. コーヒー). Kanji är ideografiska (ideographic) / morfografiska: de representerar betydelsebärande enheter eller begrepp (t.ex. 木 för träd, 山 för berg). Vissa kanji är ursprungligen piktografiska (pictographic): bildtecken som avbildar konkreta föremål (t.ex. 山 som liknar bergstoppar, 川 som liknar en flod). Lärarens anvisning: se till att definiera alla tre termerna tydligt och inkludera japanska tecken som exempel för varje system!',
+  { points: 10, topic: 'Grammatikteori' },
+);
+eq(
+  'goto-mock',
+  '1.2',
+  2,
+  'Förklara om Kanji läsningar:\n• Förklara varför det ofta finns två eller fler läsningar/uttal av ett samma kanji-tecken.\n• Nämn namnet på de två grupperna som de olika läsningarna av kanji-tecken brukar sorteras in i.\n• Förklara/skriv minst ett kanji-tecken från Genki-boken som exempel på hur ett visst tecken kan läsas på flera olika sätt.',
+  'Kanji har ofta flera läsningar eftersom de lånades in från Kina vid olika historiska tidpunkter och anpassades till det redan existerande inhemska japanska språket. De två grupperna är On-yomi (音読み, läsningar med kinesiskt ursprung) och Kun-yomi (訓読み, inhemska japanska läsningar). Exempel från Genki: 山 (kun-läsning: やま när tecknet står ensamt; on-läsning: サン i sammansättningar som 富士山 ふじさん); eller 日 (kun-läsning: ひ; on-läsning: にち i 日本 にほん eller じつ). Skriv faktiska japanska tecken i svaret enligt lärarens instruktion!',
+  { points: 9, topic: 'Grammatikteori' },
+);
+
+[
+  [
+    'びょういんはここです。',
+    ['byōin wa koko', 'byooin wa koko', 'byôin wa koko', 'byoin wa koko'],
+    'びょういん romaniseras byōin (eller byooin). Partikeln は uttalas och romaniseras "wa" (aktuellt uttal, inte "ha").',
+  ],
+  [
+    'だいがくへじてんしゃでいきます。',
+    ['daigaku e jitensha', 'daigaku e ji ten sha', 'daigaku e jiten sha'],
+    'Partikeln へ uttalas och romaniseras "e" (aktuellt uttal, inte "he"). じてんしゃ romaniseras jitensha.',
+  ],
+  [
+    'わたしはとしょかんでべんきょうします。',
+    ['watashi wa toshokan'],
+    'わたしはとしょかん romaniseras "watashi wa toshokan". Partikeln は romaniseras "wa".',
+  ],
+].forEach(([p, a, exp], i) =>
+  eq(
+    'goto-mock',
+    '1.3-' + (i + 1),
+    2,
+    `Romanisera BARA de understrukna orden:\n${p}`,
+    exp,
+    { self: false, answers: a, points: 2, topic: 'Ord & kanji' },
+  ),
+);
+
+const mockWordClasses = [
+  ['あそこ', 'Pronoun', 'あそこ は しずか です。'],
+  ['しずか', 'Adjective', 'あそこ は しずか です。'],
+  ['で', 'Particle', 'どこ で パン を かいました か。'],
+  ['パン', 'Noun', 'どこ で パン を かいました か。'],
+  ['か', 'Particle', 'どこ で パン を かいました か。'],
+  ['つめたい', 'Adjective', 'つめたい おみず を がぶがぶ のみました。'],
+  ['がぶがぶ', 'ideophone', 'つめたい おみず を がぶがぶ のみました。'],
+  ['に', 'Particle', 'バス が いちじ に きます。'],
+  ['きます', 'Verb', 'バス が いちじ に きます。'],
+  ['とても', 'Adverb', 'これ は とても たかい ケーキ です。'],
+  ['たかい', 'Adjective', 'これ は とても たかい ケーキ です。'],
+  ['です', 'Verb', 'これ は とても たかい ケーキ です。'],
+  ['さつ', 'numerical classifier', 'ノート を ２さつ ください。'],
+  ['これ', 'Pronoun', '「これは いくらですか。」'],
+  ['ざーざー', 'ideophone', 'あめ(regn) が ざーざー ふります(falla)。'],
+  ['がくせい', 'Noun', 'がくせい が １０にん います。'],
+  ['にん', 'numerical classifier', 'がくせい が １０にん います。'],
+  ['よく', 'Adverb', 'よく おんがく を ききます か。'],
+];
+
+mockWordClasses.forEach(([word, ans, context], i) =>
+  eq(
+    'goto-mock',
+    '2-' + (i + 1),
+    3,
+    `Ange ordklass för ${word} i originalmeningen.\nMening: ${context}`,
+    `${word}: ${ans}. ${context}`,
+    {
+      self: false,
+      answers: [ans],
+      choices: classes,
+      points: 1,
+      topic: 'Ord & kanji',
+    },
+  ),
+);
+
+const particleMockChoices = [
+  'A. Topic',
+  'B. Subjekt',
+  'C. Lista substantiv',
+  'D. Direkt objekt',
+  'E. Medaktör (göra tillsammans)',
+  'F. Redskap/medel (tool)',
+  'G. Handlingsplats',
+  'H. Tid/Datum',
+  'I . Befintlighet',
+  'J. Citatmarkör',
+  'K. Indirekt objekt (mottagare)',
+  'L. Mål/direktion',
+  'M. Understryka',
+  'N. Binda substantiv och bilda fras',
+  'O. Också',
+];
+
+const mockParticles = [
+  ['たんじろう【は】ひとりで山にいきます。', 'A. Topic', 'たんじろう は markerar samtalsämnet/temat.'],
+  ['たんじろうはひとりで山【に】いきます。', 'L. Mål/direktion', 'に markerar destination/rörelsemål tillsammans med verbet いきます.'],
+  ['カオナシは「あ…あ…」【と】いいました。', 'J. Citatmarkör', 'と fungerar som citatmarkör efter yttrandet.'],
+  ['トトロは木の下【で】まちます。', 'G. Handlingsplats', 'で markerar handlingsplatsen (木の下) där handlingen まちます sker.'],
+  ['コナン【の】めがねはとてもべんりですよ。', 'N. Binda substantiv och bilda fras', 'の binder ihop två substantiv (Konans glasögon) och bildar en fras.'],
+  ['コナンのめがねはとてもべんりです【よ】。', 'M. Understryka', 'よ understryker och framhäver information för lyssnaren.'],
+  ['リヴァイさん【が】おちゃをルンドでかいました。', 'B. Subjekt', 'が markerar meningssubjektet (vem som köpte teet).'],
+  ['リヴァイさんがおちゃ【を】ルンドでかいました。', 'D. Direkt objekt', 'を markerar det direkta objektet (vad som köptes).'],
+  ['リヴァイさんがおちゃをルンド【で】かいました。', 'G. Handlingsplats', 'で markerar handlingsplatsen (Lund) där köpet genomfördes.'],
+  ['えき【へ】じてんしゃでいきます。', 'L. Mål/direktion', 'へ anger riktning/mål för förflyttningen.'],
+  ['えきへじてんしゃ【で】いきます。', 'F. Redskap/medel (tool)', 'で markerar transportmedel/redskap (med cykel).'],
+  ['アーニャ【も】夜 18 時からスパイのアニメをみます。', 'O. Också', 'も betyder "också" (Anya ser också på anime).'],
+  ['アーニャも夜 18 時からスパイ【の】アニメをみます。', 'N. Binda substantiv och bilda fras', 'の binder samman substantiven スパイ och anime.'],
+  ['スウェーデン人はたいていスウェーデン語【と】英語を話す。', 'C. Lista substantiv', 'と binder ihop och listar två substantiv (svenska och engelska).'],
+  ['スウェーデン人はたいていスウェーデン語と英語【を】話す。', 'D. Direkt objekt', 'を markerar det direkta objektet för verbet 話す.'],
+  ['今日１５時【に】ともだちとフィーカを SOL のカフェでします。', 'H. Tid/Datum', 'に markerar en specifik tidpunkt (kl 15).'],
+  ['今日１５時にともだち【と】フィーカを SOL のカフェでします。', 'E. Medaktör (göra tillsammans)', 'と markerar sällskap/medaktör (tillsammans med en vän).'],
+  ['今日１５時にともだちとフィーカを SOL のカフェ【で】します。', 'G. Handlingsplats', 'で markerar platsen där handlingen (fikat) äger rum.'],
+  ['アーニャ【が】 Jultomten にてがみ(brev)をかきました。', 'B. Subjekt', 'が markerar subjektet som utför skrivandet.'],
+  ['アーニャが Jultomten 【に】てがみ(brev)をかきました。', 'K. Indirekt objekt (mottagare)', 'に markerar mottagaren av brevet (Jultomten).'],
+  ['アーニャが Jultomten にてがみ【を】かきました。', 'D. Direkt objekt', 'を markerar det direkta objektet (brevet).'],
+  ['私のかばんの中【に】 Surströmming があります。', 'I . Befintlighet', 'に markerar befintlighetsplatsen för existensverbet あります.'],
+  ['私のかばんの中に Surströmming 【が】あります。', 'B. Subjekt', 'が markerar existenssubjektet vid verbet あります.'],
+];
+
+mockParticles.forEach(([prompt, ans, exp], i) => {
+  const contrastive = Object.fromEntries(
+    particleMockChoices
+      .filter((c) => c !== ans)
+      .map((c) => [c, `Du valde ${c}. Rätt grammatisk funktion är ${ans}: ${exp}`]),
+  );
+  eq(
+    'goto-mock',
+    '3-' + (i + 1),
+    4,
+    `Vilken grammatisk funktion har den markerade partikeln?\n${prompt}`,
+    exp,
+    {
+      self: false,
+      answers: [ans],
+      choices: particleMockChoices,
+      contrastive,
+      points: 1,
+      topic: 'Partiklar',
+    },
+  );
+});
+
+const mockWordOrder = [
+  ['「なんようびに日本語のクラスがありますか。」', 'S: 日本語のクラス; V: あります. Inget objekt. (なんようびに är tidsadverbial).'],
+  ['「その T シャツは２０００円です。」', 'Tema: その Tシャツ; Predikat/V: ２０００円です (です är kopula). Inget direkt objekt.'],
+  ['すいようびににほんごのクラスがあります。', 'S: にほんごのクラス; V: あります. Inget objekt. (すいようびに är tidsadverbial).'],
+  ['きょうとでたくさんのおてらのしゃしんをとりました。', 'O: たくさんのおてらのしゃしん; V: とりました. Subjektet är utelämnat (Jag). (きょうとで är platssadverbial).'],
+  ['「公園にもいきました。」', 'V: いきました. Subjektet är utelämnat (Jag). Inget objekt. (公園にも är måladverbial).'],
+  ['東京の地下鉄の駅にはたくさん人がいる。', 'S: 人 (eller たくさん人); V: いる. Inget direkt objekt. (東京の地下鉄の駅には är befintlighetsplats).'],
+  ['８月にスウェーデンでは kräftor をたべます。', 'O: kräftor; V: たべます. Subjektet är utelämnat (Vi/man). (８月に och スウェーデンでは är tids- och platssadverbial).'],
+  ['わたしはイケアでいすとランプ（lampa）をかいました。', 'S/Tema: わたし; O: いすとランプ; V: かいました. (イケアで är handlingsplats).'],
+  ['きのうシナモンパンとクッキーをつくりました。', 'O: シナモンパンとクッキー; V: つくりました. Subjektet är utelämnat (Jag). (きのう är tidsadverbial).'],
+  ['わたしはたいてい納豆とごはんとたまごを食べます。', 'S/Tema: わたし; O: 納豆とごはんとたまご; V: 食べます. (たいてい är frekvensadverb).'],
+  ['あのおいしいスウェーデンのポテトはサシャが一人でたべました。', 'S: サシャ; O/Tema: あのおいしいスウェーデンのポテト; V: たべました. Lärarens facitnot: (あの一ポテト) markeras med は i stället för を eftersom det är topikaliserat som tema i meningsbörjan.'],
+];
+
+mockWordOrder.forEach(([p, m], i) =>
+  eq(
+    'goto-mock',
+    '4-' + (i + 1),
+    5,
+    `Identifiera subjekt (S), objekt (O) och verb (V) i följande mening:\n${p}`,
+    m,
+    { points: 2, topic: 'Ordföljd' },
+  ),
+);
+
+[
+  [
+    'ストックホルム',
+    '6, 7',
+    'Syllable: 6, Mora: 7. Lilla tsu (っ) kan inte bilda en egen stavelse men räknas som en mora: mora: su-to-tsu-ku-ho-ru-mu (7), stavelse: sut-to-ku-ho-ru-mu (6).',
+    ['6, 7', '6/7', '6 / 7', '6,7', '6 stavelser, 7 moror'],
+  ],
+  [
+    'しんじゅく',
+    '3, 4',
+    'Syllable: 3, Mora: 4. ん räknas som en separat mora: mora: shi-n-ju-ku (4), stavelse: shin-ju-ku (3).',
+    ['3, 4', '3/4', '3 / 4', '3,4', '3 stavelser, 4 moror'],
+  ],
+  [
+    'コペンハーゲン',
+    '4, 7',
+    'Syllable: 4, Mora: 7. Lång vokal (ー) och ん räknas som egna moror: mora: ko-pe-n-ha-a-ge-n (7), stavelse: ko-pen-haa-gen (4).',
+    ['4, 7', '4/7', '4 / 7', '4,7', '4 stavelser, 7 moror'],
+  ],
+].forEach(([word, ans, exp, allAns], i) =>
+  eq(
+    'goto-mock',
+    '5-' + (i + 1),
+    6,
+    `Antal stavelser och moror i ${word}? Skriv stavelser, moror (t.ex. 6, 7).`,
+    exp,
+    { self: false, answers: allAns, points: 2, topic: 'Moror & stavelser' },
+  ),
+);
+
+[
+  [
+    'Hiragana och Katakana utvecklades från kanji.',
+    'Sant',
+    'Sant. Både hiragana och katakana utvecklades genom förenkling av kinesiska kanji-tecken (man\'yōgana).',
+  ],
+  [
+    'Japanska pronomen utelämnas oftast i tal och skrift.',
+    'Sant',
+    'Sant. Japanska är ett pro-drop-språk där personliga pronomen oftast utelämnas när sammanhanget är tydligt.',
+  ],
+  [
+    'Manyogana blandar piktografiska och ideografiska skriftsystem.',
+    'Falskt',
+    'Falskt. Man\'yōgana använde kanji fonografiskt (phonographic) för att representera japanska ljud, inte ideografiskt.',
+  ],
+  [
+    'En topikmarkörs effekt kan gälla för mer än en mening.',
+    'Sant',
+    'Sant. Ett etablerat tema (markerat med は) kan förbli samtalsämne över flera efterföljande meningar.',
+  ],
+  [
+    'Rendaku uppstår i sidoordnad sammansättning.',
+    'Falskt',
+    'Falskt. Rendaku (sekundär stämning) uppstår typiskt i underordnade sammansättningar, inte i sidoordnade sammansättningar.',
+  ],
+  [
+    'I Japan fanns inget språk före Kanji-tecknens ankomst.',
+    'Falskt',
+    'Falskt. Japan hade ett fullt utvecklat muntligt språk långt före kontakten med Kina och införandet av kanji.',
+  ],
+].forEach(([statement, ans, exp], i) =>
+  eq(
+    'goto-mock',
+    '6-' + (i + 1),
+    6,
+    statement,
+    exp,
+    {
+      self: false,
+      answers: [ans],
+      choices: ['Sant', 'Falskt'],
+      points: 1,
+      topic: 'Grammatikteori',
+    },
+  ),
+);
+
 eq(
   'japc11',
   '1.1',
@@ -842,8 +1104,8 @@ export const guides = [
 questions.push(...extraQuestions, ...l1l5Questions, ...calendarDayQuestions);
 for (const q of questions) {
   q.section = q.id.replace(/^.*?-/, '').split('-')[0];
-  if (/^(gema70-5-|japc11-5\.1-)/.test(q.id)) q.topic = 'Moror & stavelser';
-  if (/^(gema70-4-|japc11-4\.1-)/.test(q.id)) q.topic = 'Ordföljd';
+  if (/^(gema70-5-|japc11-5\.1-|goto-mock-5-)/.test(q.id)) q.topic = 'Moror & stavelser';
+  if (/^(gema70-4-|japc11-4\.1-|goto-mock-4-)/.test(q.id)) q.topic = 'Ordföljd';
   q.promptLang ||=
     q.exam === 'japc11' && /^(Explain|Each|Japanese|Pitch|Swedish)/.test(q.prompt) ? 'en' : 'sv';
   q.answerLang ||=
