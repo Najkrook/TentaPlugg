@@ -36,6 +36,17 @@ export function homeView(ctx) {
           : ''
       }
     </section>
+    <section class="vocabulary-practice-panel">
+      <p class="overline">170 GLOSOR · LEKTION 3–5</p>
+      <h2>Träna glosor med bara kana</h2>
+      <p>Tio frågor åt gången. Svenska, hiragana och katakana.</p>
+      <div class="vocabulary-actions">
+        <button class="primary" @click=${() => ctx.startVocabulary()}>Träna glosor</button>
+        <button class="secondary" @click=${() => ctx.navigate('vocabulary')}>
+          Välj lektion och se framsteg
+        </button>
+      </div>
+    </section>
     <section class="focus-panel">
       <div class="focus-copy">
         <span class="focus-label">${icon('Target')} Dagens fokus</span>

@@ -1,5 +1,5 @@
 import { DEFAULT_EXAM_DATE, INTERVALS, SCHEMA_VERSION, STUDY_TIME_ZONE } from './config.js';
-import { questions } from './data.js';
+import { allQuestions as questions } from './question-bank.js';
 import { learningTips } from './pedagogy.js';
 import { questionForSession } from './particles.js';
 export const normalize = (value) =>

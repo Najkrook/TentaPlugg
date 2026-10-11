@@ -1,7 +1,8 @@
 import { html } from 'lit-html';
 import { keyed } from 'lit-html/directives/keyed.js';
 import { live } from 'lit-html/directives/live.js';
-import { questions } from '../data.js';
+import { allQuestions as questions } from '../question-bank.js';
+import { vocabularySessionView } from './vocabulary-practice.js';
 import { scoreAttempt, getContrastiveFeedback, getLearningTip, previewReview } from '../engine.js';
 import { promptSpeech, answerSpeech, japaneseText } from '../speech.js';
 import { icon, languageText, speechButton } from './shared.js';
@@ -44,6 +45,7 @@ export function formatRatingLabel(rating, theme) {
 
 export function sessionView(ctx) {
   const s = ctx.session;
+  if (s.vocabulary) return vocabularySessionView(ctx);
   if (s.done) return resultView(ctx);
   const q = questionForSession(
     questions.find((q) => q.id === s.ids[s.index]),

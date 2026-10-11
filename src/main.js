@@ -1,7 +1,9 @@
 import './style.css';
 import { html, render as renderTemplate } from 'lit-html';
 import { keyed } from 'lit-html/directives/keyed.js';
-import { questions, exams, examQuestions } from './data.js';
+import { questions as studyQuestions, exams, examQuestions } from './data.js';
+import { allQuestions as questions } from './question-bank.js';
+import { selectVocabulary, vocabularyById, vocabularyChoices } from './vocabulary-practice.js';
 import {
   fresh,
   correct,
@@ -236,7 +238,7 @@ function progress() {
 function plan() {
   const today = dayKey(Date.now()),
     existing = state.plans[today];
-  const result = ensurePlan(state, questions, Date.now());
+  const result = ensurePlan(state, studyQuestions, Date.now());
   if (!existing) persist();
   return result;
 }
@@ -265,6 +267,8 @@ function getCtx() {
     daysMode: state.daysMode || 'first10',
     setDaysMode,
     startDaysPractice,
+    startVocabulary,
+    chooseVocabulary,
     start,
     startTask,
     startExam,
@@ -696,7 +700,7 @@ async function start(topic, options = {}) {
     options.dueOnly !== undefined ? options.dueOnly : options.extra ? false : isAllDue;
   const count = isAllDue ? Infinity : typeof chosenCount === 'number' ? chosenCount : 10;
 
-  let candidateBank = questions;
+  let candidateBank = studyQuestions;
   if (topic === 'L1-L5') {
     candidateBank = candidateBank.filter((q) => q.set === 'l1l5');
   }
@@ -745,6 +749,47 @@ async function start(topic, options = {}) {
   );
   persist(true);
   render(true);
+}
+async function startVocabulary({ lesson = 'all', extra = false, ids } = {}) {
+  const selected = ids || selectVocabulary(state.stats, Date.now(), { lesson, extra });
+  if (!selected.length) {
+    if (
+      await ask(
+        'Dagens repetition är klar för det här urvalet. Vill du träna extra?',
+        'Träna extra',
+      )
+    )
+      return startVocabulary({ lesson, extra: true });
+    return;
+  }
+  flush();
+  session = createSession(
+    selected,
+    ids ? 'Glosor · Öva missarna' : 'Glosor · Lektion ' + (lesson === 'all' ? '3–5' : lesson),
+    {
+      vocabulary: true,
+      vocabularyLesson: lesson,
+      vocabularyChoices: Object.fromEntries(
+        selected.map((id) => [id, vocabularyChoices(vocabularyById.get(id))]),
+      ),
+    },
+  );
+  persist(true);
+  render(true);
+}
+function chooseVocabulary(questionId, value) {
+  if (
+    !session?.vocabulary ||
+    session.done ||
+    currentQ()?.id !== questionId ||
+    typeof session.grades[questionId] === 'boolean' ||
+    !session.vocabularyChoices[questionId]?.includes(value)
+  )
+    return;
+  session.answers[questionId] = value;
+  grade(correct(currentQ(), value));
+  render();
+  document.querySelector('.vocabulary-next')?.focus();
 }
 function startTask(task) {
   flush();
@@ -909,6 +954,8 @@ function jump(index) {
   render(true);
 }
 async function next() {
+  if (session?.vocabulary && (session.done || typeof session.grades[currentQ()?.id] !== 'boolean'))
+    return;
   if (session.reviewSelf) {
     const index = session.ids.findIndex(
       (id) =>
@@ -1122,6 +1169,7 @@ if (typeof window !== 'undefined') {
   });
   window.addEventListener('keydown', (e) => {
     if (!session || session.done || session.mode === 'exam') return;
+    if (session.vocabulary) return;
     if (composing || e.isComposing) return;
 
     const active = document.activeElement;

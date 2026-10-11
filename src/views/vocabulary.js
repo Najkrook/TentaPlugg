@@ -1,6 +1,7 @@
 import { html } from 'lit-html';
 import { vocabularyList, kanjiList } from '../vocabulary-data.js';
 import { heading, icon, speechButton } from './shared.js';
+import { vocabularyPracticePanel } from './vocabulary-practice.js';
 
 let activeLesson = 'all';
 let activeCategory = 'all';
@@ -100,6 +101,7 @@ export function vocabularyView(ctx) {
       </button>
     </div>
 
+    ${vocabularyPracticePanel(ctx, activeLesson)}
     ${heading(
       'ORD & KANJI · GENKI I',
       'Genki I Ordförråd (Lektion 3–5)',

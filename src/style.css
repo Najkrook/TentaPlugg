@@ -1,4 +1,88 @@
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;600;700&display=swap');
+.vocabulary-practice-panel {
+  padding: 24px;
+  margin: 20px 0;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--paper, #fff);
+}
+.vocabulary-progress,
+.vocabulary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  margin: 20px 0;
+}
+.vocabulary-progress strong {
+  display: block;
+  font-size: 24px;
+}
+.vocabulary-choices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 24px 0;
+}
+.vocabulary-choice {
+  min-height: 72px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
+  font-size: 18px;
+}
+.vocabulary-choice span {
+  display: block;
+  font-size: 13px;
+}
+.vocabulary-choice:disabled {
+  opacity: 1;
+  cursor: default;
+}
+.vocabulary-choice.vocabulary-correct {
+  color: #20552d;
+  background: #e7f4e8;
+  border-color: #337744;
+}
+.vocabulary-choice.vocabulary-wrong {
+  color: #8c2929;
+  background: #fff0ee;
+  border-color: #ae4646;
+}
+.vocabulary-feedback {
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.vocabulary-session h1 {
+  overflow-wrap: anywhere;
+}
+.vocabulary-result-list {
+  padding: 0;
+  list-style: none;
+  text-align: left;
+}
+.vocabulary-result-list li {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+.vocabulary-result-list li > span {
+  display: inline-block;
+  min-width: 75px;
+  font-size: 13px;
+}
+@media (max-width: 600px) {
+  .vocabulary-choices {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .vocabulary-practice-panel {
+    padding: 18px;
+  }
+  .vocabulary-actions > button {
+    flex: 1 1 180px;
+    white-space: normal;
+  }
+}
 /* Two-step particle practice: equally selectable characters, then word-level editing. */
 .particle-steps {
   display: flex;
@@ -6737,9 +6821,15 @@ html:not([data-theme='sakura']) .sound-slider,
 }
 
 .calendar-mode-picker {
+  min-width: 0;
+  max-width: 100%;
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-wrap: wrap;
+}
+
+.calendar-mode-picker .pill-group {
   flex-wrap: wrap;
 }
 
