@@ -281,9 +281,43 @@ export function sessionView(ctx) {
         <div class="question-actions">
           ${s.index > 0 ? html`<button class="secondary" @click=${() => ctx.jump(s.index - 1)}>Föregående</button>` : html`<span></span>`}${s.mode === 'exam' && !s.review ? html`<button class="primary" @click=${ctx.next}>${s.index === s.ids.length - 1 ? 'Lämna in tentan' : 'Nästa fråga'} ${icon('ChevronRight')}</button>` : !feedback ? html`<button class="primary" @click=${ctx.check}>${q.self ? 'Visa modellösning' : 'Kontrollera svar'}${ctx.theme === 'sakura' ? html` <span class="kaomoji" aria-hidden="true">✨</span>` : ''} ${icon('Check')}</button>` : !q.self ? html`<button class="primary" @click=${ctx.next}>${s.index === s.ids.length - 1 && (!s.loopErrors || !s.failedLoopIds?.length) ? 'Visa resultat' : s.loopErrors && s.index === s.ids.length - 1 ? 'Fortsätt repetition' : 'Nästa fråga'}${ctx.theme === 'sakura' ? html` <span class="kaomoji" aria-hidden="true">🌸</span>` : ''} ${icon('ChevronRight')}</button>` : ''}
         </div>
-        ${s.mode === 'exam' ? html`<div class="question-jump">${s.ids.map((id, i) => html`<button class="${i === s.index ? 'current' : ''} ${s.answers[id] ? 'answered' : ''}" aria-label="Fråga ${i + 1}" aria-current=${i === s.index ? 'step' : 'false'} @click=${() => ctx.jump(i)}>${i + 1}</button>`)}</div>` : ''}
+        ${questionJumpTemplate(ctx)}
       </section>`,
     )}`;
+}
+
+export function questionJumpTemplate(ctx) {
+  const s = ctx.session;
+  if (s.mode !== 'exam') return '';
+  const isReview = Boolean(s.review || s.submittedAt);
+  return html`<div class="question-jump">${s.ids.map((id, i) => {
+    const isCurrent = i === s.index;
+    let cls = isCurrent ? 'current' : '';
+    let label = `Fråga ${i + 1}`;
+
+    if (isReview) {
+      if (s.grades[id] === true) {
+        cls += ' correct';
+        label += ' (Rätt)';
+      } else if (s.grades[id] === false) {
+        cls += ' incorrect';
+        label += ' (Fel)';
+      } else {
+        cls += ' pending';
+        label += ' (Behöver kontrolleras)';
+      }
+    } else if (s.answers[id]) {
+      cls += ' answered';
+      label += ' (besvarad)';
+    }
+
+    return html`<button
+      class="${cls.trim()}"
+      aria-label="${label}"
+      aria-current=${isCurrent ? 'step' : 'false'}
+      @click=${() => ctx.jump(i)}
+    >${i + 1}</button>`;
+  })}</div>`;
 }
 function ratingButtonsTemplate(ctx, q, currentBox) {
   const isSakura = ctx.theme === 'sakura';
@@ -458,7 +492,7 @@ function resultView(ctx) {
           s,
         );
         return html`<button @click=${() => ctx.review(i)}>
-          <span class="result-marker ${s.grades[id] ? 'ok' : ''}"
+          <span class="result-marker ${s.grades[id] === true ? 'ok' : s.grades[id] === false ? 'wrong' : 'pending'}"
             >${typeof s.grades[id] !== 'boolean' ? '?' : s.grades[id] ? '✓' : '↻'}</span
           ><span>${languageText(q?.prompt.slice(0, 100))}</span>${icon('ChevronRight')}
         </button>`;

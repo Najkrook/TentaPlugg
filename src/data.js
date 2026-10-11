@@ -251,7 +251,7 @@ lesson.forEach(([p, a, e], i) =>
 export const exams = [
   {
     id: 'gema70',
-    title: 'GEMA70',
+    title: 'Gotoせんせい tenta',
     subtitle: 'Grammatik · maj 2026',
     description: 'Skriftsystem, ordklasser, partiklar, ordföljd och ljudsystem.',
     pages: 6,
@@ -267,7 +267,7 @@ export const exams = [
   },
   {
     id: 'reading',
-    title: 'GEMA70',
+    title: 'Muraoせんせい tenta',
     subtitle: 'Läsning & skrivning · maj 2026',
     description: 'Ord, kanji, läsförståelse och egna meningar på japanska.',
     pages: 12,
