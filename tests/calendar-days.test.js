@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import {
   calendarDayQuestions,
   CALENDAR_EXCEPTION_DAYS,
@@ -105,16 +106,12 @@ test('Calendar Days: Answers validate kana, romaji, and macron variations via co
 });
 
 test('Calendar Days: Looping deck session queues missed questions until answered correctly', () => {
-  const session = createSession(
-    ['calendar-day-1', 'calendar-day-2'],
-    'Månadens dagar: Test',
-    {
-      loopErrors: true,
-      daysMode: 'first10',
-      topic: 'Dagar',
-      failedLoopIds: [],
-    },
-  );
+  const session = createSession(['calendar-day-1', 'calendar-day-2'], 'Månadens dagar: Test', {
+    loopErrors: true,
+    daysMode: 'first10',
+    topic: 'Dagar',
+    failedLoopIds: [],
+  });
 
   assert.equal(session.loopErrors, true);
   assert.equal(session.ids.length, 2);
@@ -180,7 +177,9 @@ test('Calendar Days: Home view renders calendar practice section and mode select
     plan: { tasks: [], completed: {} },
     progress: () => ({ done: 0, due: 0, wrong: 0 }),
     daysMode: 'exceptions',
-    setDaysMode: (m) => { state.daysMode = m; },
+    setDaysMode: (m) => {
+      state.daysMode = m;
+    },
     startDaysPractice: () => {},
     start: () => {},
   };
@@ -214,4 +213,39 @@ test('Calendar Days: Session view renders calendar badge and feedback showcase',
 
   const template = sessionView(ctx);
   assert(template, 'Session view renders calendar question without error');
+});
+
+test('Calendar Days: CSS and Home markup contract for responsive mobile layout', () => {
+  const css = fs.readFileSync('src/style.css', 'utf8');
+  assert.ok(css.includes('@media (max-width: 640px)'), 'Mobile media query should exist');
+  assert.ok(
+    css.includes('.calendar-mode-picker .pill-group'),
+    'Calendar pill-group styling exists',
+  );
+  assert.ok(css.includes('.calendar-stat-row'), 'Calendar stat-row styling exists');
+  assert.ok(
+    css.includes("[data-theme='sakura'] .calendar-mode-picker"),
+    'Sakura theme calendar picker styling exists',
+  );
+  assert.ok(
+    css.includes('.calendar-panel-stats .mini-track'),
+    'Mini track progress styling exists',
+  );
+
+  const state = fresh();
+  const ctx = {
+    state,
+    now: Date.now(),
+    plan: { tasks: [], completed: {} },
+    progress: () => ({ done: 0, due: 0, wrong: 0 }),
+    daysMode: 'first10',
+    setDaysMode: () => {},
+    startDaysPractice: () => {},
+    start: () => {},
+  };
+  const template = homeView(ctx);
+  const str = JSON.stringify(template);
+  assert.ok(str.includes('calendar-stat-row'), 'Template includes calendar-stat-row');
+  assert.ok(str.includes('calendar-pill-group'), 'Template includes calendar-pill-group');
+  assert.ok(str.includes('calendar-mode-label'), 'Template includes calendar-mode-label');
 });

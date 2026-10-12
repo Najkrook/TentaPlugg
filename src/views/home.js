@@ -214,16 +214,20 @@ export function homeView(ctx) {
             </div>
           </div>
           <div class="calendar-panel-stats">
-            <span class="calendar-stat-number">${masteredDays} / 31</span>
-            <small>bemästrade</small>
+            <div class="calendar-stat-row">
+              <span class="calendar-stat-number">${masteredDays} / 31</span>
+              <small>bemästrade</small>
+            </div>
             <div class="mini-track"><span style="width:${(masteredDays / 31) * 100}%"></span></div>
           </div>
         </div>
         <div class="calendar-panel-controls">
           <div class="calendar-mode-picker">
-            <span class="session-picker-label" id="calendar-mode-label">Välj omfång:</span>
+            <span class="session-picker-label calendar-mode-label" id="calendar-mode-label"
+              >Välj omfång:</span
+            >
             <div
-              class="pill-group"
+              class="pill-group calendar-pill-group"
               role="radiogroup"
               aria-labelledby="calendar-mode-label"
               @keydown=${(e) => {
@@ -267,10 +271,7 @@ export function homeView(ctx) {
               </button>
             </div>
           </div>
-          <button
-            class="primary start-days-btn"
-            @click=${() => ctx.startDaysPractice?.(daysMode)}
-          >
+          <button class="primary start-days-btn" @click=${() => ctx.startDaysPractice?.(daysMode)}>
             Starta övning ${icon('ChevronRight')}
           </button>
         </div>
@@ -287,7 +288,10 @@ export function homeView(ctx) {
         ${topics.map((t, i) => {
           const qs = questions.filter((q) => q.topic === t),
             n = qs.filter((q) => state.stats[q.id]?.ok).length;
-          return html`<button class="topic-card ${t === 'Dagar' ? 'calendar-topic-card' : ''}" @click=${() => ctx.start(t)}>
+          return html`<button
+            class="topic-card ${t === 'Dagar' ? 'calendar-topic-card' : ''}"
+            @click=${() => ctx.start(t)}
+          >
             <span class="topic-letter t${i % 5}" lang="ja"
               >${['は', 'い', '字', '文', '読', '音', '順', 'あ', '日'][i] || '日'}</span
             >
