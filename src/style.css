@@ -1048,6 +1048,31 @@ footer {
   grid-template-columns: repeat(auto-fit, minmax(95px, 1fr));
   gap: 10px;
 }
+.hayashi-panel .question-title {
+  white-space: pre-line;
+}
+.hayashi-panel .choices {
+  grid-template-columns: 1fr;
+}
+.hayashi-panel .choice {
+  min-height: 56px;
+  text-align: left;
+  line-height: 1.6;
+}
+@media (max-width: 600px) {
+  .hayashi-panel .question-title {
+    font-size: 19px;
+    line-height: 1.5;
+    margin: 18px 0;
+  }
+  .hayashi-panel .question-meta {
+    font-size: 11px;
+  }
+  .hayashi-panel .choice {
+    font-size: 17px;
+    padding: 10px;
+  }
+}
 .choice {
   border: 1px solid #dce5d7;
   background: #fff;

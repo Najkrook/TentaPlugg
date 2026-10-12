@@ -17,7 +17,7 @@ function renderToString(result) {
         out += renderToString(result.values[i]);
       }
     }
-    return out;
+    return out.replace(/>\s+(\d+)\s+</g, '>$1<');
   }
   return '';
 }

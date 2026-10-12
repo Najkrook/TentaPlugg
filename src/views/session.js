@@ -9,6 +9,7 @@ import { icon, languageText, speechButton } from './shared.js';
 import { questionForSession } from '../particles.js';
 import { particleSessionView } from './particles.js';
 import { followUpQuestions } from '../follow-up.js';
+import { feedbackVisible, immediateFeedback } from '../exam-policy.js';
 
 export function formatInterval(ms) {
   if (ms <= 0) return 'Nu';
@@ -64,7 +65,7 @@ export function sessionView(ctx) {
     return particleSessionView(ctx, q, () => ratingButtonsTemplate(ctx, q, currentBox));
   const value = s.answers[q.id] || '',
     graded = typeof s.grades[q.id] === 'boolean';
-  const feedback = (s.mode !== 'exam' && (graded || s.revealed?.[q.id])) || s.review;
+  const feedback = feedbackVisible(s, q.id);
   const isIncorrect = feedback && !q.self && s.grades[q.id] === false;
   const contrastive = isIncorrect ? getContrastiveFeedback(q, value) : null;
   const ask = promptSpeech(q),
@@ -77,8 +78,8 @@ export function sessionView(ctx) {
   return html`<div class="session-top">
       <button class="text-button" @click=${ctx.exit}>${icon('ArrowLeft')} Spara & lämna</button
       ><span
-        >${s.mode === 'exam' ? 'Tentaläge' : 'Träningspass'} · ${s.index + 1} /
-        ${s.ids.length}</span
+        >${immediateFeedback(s) ? 'Mobilträning' : s.mode === 'exam' ? 'Tentaläge' : 'Träningspass'}
+        · ${s.index + 1} / ${s.ids.length}</span
       >
     </div>
     <div class="session-track">
@@ -86,11 +87,11 @@ export function sessionView(ctx) {
     </div>
     ${keyed(
       q.id,
-      html`<section class="question-panel">
+      html`<section class="question-panel ${q.originalAvailable === false ? 'hayashi-panel' : ''}">
         <div class="question-meta">
           <span>${q.topic}</span
           ><span
-            >${q.official ? 'Originalfacit · Lesson5' : q.exam ? 'Originalfråga · modellösning' : 'Extra träning'}</span
+            >${q.originalAvailable === false ? 'Hayashi · Bearbetad uppgift' : q.official ? 'Originalfacit · Lesson5' : q.exam ? 'Originalfråga · modellösning' : 'Extra träning'}</span
           >
         </div>
         ${
@@ -103,7 +104,9 @@ export function sessionView(ctx) {
                 <div class="calendar-question-text">
                   <h1 class="question-title" tabindex="-1" lang="sv">${q.prompt}</h1>
                   <p class="calendar-subprompt">${q.subprompt}</p>
-                  <p class="calendar-instruction">Skriv vad datumet heter på japanska (hiragana eller romaji):</p>
+                  <p class="calendar-instruction">
+                    Skriv vad datumet heter på japanska (hiragana eller romaji):
+                  </p>
                 </div>
               </div>`
             : html`<h1 class="question-title" tabindex="-1" lang=${q.promptLang || 'sv'}>
@@ -121,7 +124,7 @@ export function sessionView(ctx) {
             : ''
         }
         ${
-          q.exam
+          q.exam && q.originalAvailable !== false
             ? html`<details class="original" ?open=${q.image}>
                 <summary>Visa originaluppgiften · sida ${q.page}</summary>
                 ${ctx.imageErrors.has(path) ? html`<p role="alert">Bilden kunde inte laddas. <a href="/material/${q.exam}.pdf" target="_blank" rel="noopener">Öppna original-PDF:en</a>.</p>` : html`<a href=${path} target="_blank" rel="noopener"><img loading="lazy" src=${path} alt="Originalsida ${q.page}. Öppna bilden för att förstora." @error=${() => ctx.imageError(path)} /></a><small>Tryck på bilden för att förstora.</small>`}
@@ -131,7 +134,23 @@ export function sessionView(ctx) {
         ${
           q.choices && !q.self
             ? html`<div class="choices">
-                ${q.choices.map((c) => html`<button class="choice ${value === c ? 'selected' : ''} ${feedback && q.answers?.includes(c) ? 'right' : ''}" lang=${q.choiceLang || 'sv'} aria-pressed=${value === c} aria-disabled=${feedback ? 'true' : 'false'} @click=${() => !feedback && ctx.answer(c)}>${c}</button>`)}
+                ${q.choices.map(
+                  (c) =>
+                    html`<button
+                      class="choice ${value === c ? 'selected' : ''} ${feedback && q.answers?.includes(c) ? 'right' : ''}"
+                      lang=${q.choiceLang || 'sv'}
+                      aria-pressed=${value === c}
+                      aria-disabled=${feedback ? 'true' : 'false'}
+                      @click=${(event) => {
+                        if (!feedback) {
+                          event.currentTarget.focus({ preventScroll: true });
+                          ctx.answer(c);
+                        }
+                      }}
+                    >
+                      ${c}
+                    </button>`,
+                )}
               </div>`
             : q.tiles && !q.self
               ? wordScramblerTemplate(ctx, q, value, feedback)
@@ -148,6 +167,12 @@ export function sessionView(ctx) {
                     spellcheck="false"
                     @input=${(e) => ctx.answer(e.target.value, false)}
                     @keydown=${(e) => {
+                      if (
+                        e.isComposing ||
+                        e.keyCode === 229 ||
+                        (s.mode === 'exam' && !s.submittedAt)
+                      )
+                        return;
                       if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();
                         if (!feedback) ctx.check();
@@ -200,14 +225,18 @@ export function sessionView(ctx) {
                             <span class="calendar-feedback-romaji">${q.romaji}</span>
                           </div>
                         </div>
-                        ${q.explanation
-                          ? html`<div class="calendar-explanation-box ${q.isException ? 'exception' : 'regular'}">
-                              <span class="calendar-explanation-label">
-                                ${q.isException ? '⚠️ Oregelbunden läsning' : '💡 Mönster'}
-                              </span>
-                              <p>${q.explanation}</p>
-                            </div>`
-                          : ''}
+                        ${
+                          q.explanation
+                            ? html`<div
+                                class="calendar-explanation-box ${q.isException ? 'exception' : 'regular'}"
+                              >
+                                <span class="calendar-explanation-label">
+                                  ${q.isException ? '⚠️ Oregelbunden läsning' : '💡 Mönster'}
+                                </span>
+                                <p>${q.explanation}</p>
+                              </div>`
+                            : ''
+                        }
                       </div>`
                     : html`
                         ${!q.self && !contrastive ? html`<p class="correct-answer" lang=${q.answerLang || 'sv'}><strong>Godtagna svar:</strong> ${languageText(q.answers?.join(' / '))}</p>` : ''}
@@ -249,7 +278,7 @@ export function sessionView(ctx) {
                               Jag kunde detta
                             </button>
                           </div>`
-                      : !s.grades[q.id]
+                      : !s.grades[q.id] && !immediateFeedback(s)
                         ? html`<button class="text-button" @click=${() => ctx.grade(true)}>
                             Mitt svar är också korrekt
                           </button>`
@@ -292,34 +321,38 @@ export function questionJumpTemplate(ctx) {
   const s = ctx.session;
   if (s.mode !== 'exam') return '';
   const isReview = Boolean(s.review || s.submittedAt);
-  return html`<div class="question-jump">${s.ids.map((id, i) => {
-    const isCurrent = i === s.index;
-    let cls = isCurrent ? 'current' : '';
-    let label = `Fråga ${i + 1}`;
+  return html`<div class="question-jump">
+    ${s.ids.map((id, i) => {
+      const isCurrent = i === s.index;
+      let cls = isCurrent ? 'current' : '';
+      let label = `Fråga ${i + 1}`;
 
-    if (isReview) {
-      if (s.grades[id] === true) {
-        cls += ' correct';
-        label += ' (Rätt)';
-      } else if (s.grades[id] === false) {
-        cls += ' incorrect';
-        label += ' (Fel)';
-      } else {
-        cls += ' pending';
-        label += ' (Behöver kontrolleras)';
+      if (isReview) {
+        if (s.grades[id] === true) {
+          cls += ' correct';
+          label += ' (Rätt)';
+        } else if (s.grades[id] === false) {
+          cls += ' incorrect';
+          label += ' (Fel)';
+        } else {
+          cls += ' pending';
+          label += ' (Behöver kontrolleras)';
+        }
+      } else if (s.answers[id]) {
+        cls += ' answered';
+        label += ' (besvarad)';
       }
-    } else if (s.answers[id]) {
-      cls += ' answered';
-      label += ' (besvarad)';
-    }
 
-    return html`<button
-      class="${cls.trim()}"
-      aria-label="${label}"
-      aria-current=${isCurrent ? 'step' : 'false'}
-      @click=${() => ctx.jump(i)}
-    >${i + 1}</button>`;
-  })}</div>`;
+      return html`<button
+        class="${cls.trim()}"
+        aria-label="${label}"
+        aria-current=${isCurrent ? 'step' : 'false'}
+        @click=${() => ctx.jump(i)}
+      >
+        ${i + 1}
+      </button>`;
+    })}
+  </div>`;
 }
 function ratingButtonsTemplate(ctx, q, currentBox) {
   const isSakura = ctx.theme === 'sakura';
@@ -494,7 +527,8 @@ function resultView(ctx) {
           s,
         );
         return html`<button @click=${() => ctx.review(i)}>
-          <span class="result-marker ${s.grades[id] === true ? 'ok' : s.grades[id] === false ? 'wrong' : 'pending'}"
+          <span
+            class="result-marker ${s.grades[id] === true ? 'ok' : s.grades[id] === false ? 'wrong' : 'pending'}"
             >${typeof s.grades[id] !== 'boolean' ? '?' : s.grades[id] ? '✓' : '↻'}</span
           ><span>${languageText(q?.prompt.slice(0, 100))}</span>${icon('ChevronRight')}
         </button>`;

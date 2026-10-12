@@ -30,7 +30,7 @@ export function answerSpeech(q) {
     return /[。！？]/.test(model) ? model : promptSpeech(q) || model;
   }
   if (a !== undefined && BLANK.test(q.prompt))
-    return japaneseText(q.prompt.replace(BLANK, a === '×' ? '' : a));
+    return japaneseText(q.prompt.replace(BLANK, a === '×' || a === 'Ingen partikel' ? '' : a));
   if (hasJapanese(a)) return japaneseText(a);
   return promptSpeech(q) || japaneseText(q.model);
 }

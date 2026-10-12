@@ -1,4 +1,5 @@
 import './style.css';
+import { answerLocked, canCheck, immediateFeedback } from './exam-policy.js';
 import { html, render as renderTemplate } from 'lit-html';
 import { keyed } from 'lit-html/directives/keyed.js';
 import { questions as studyQuestions, exams, examQuestions } from './data.js';
@@ -812,7 +813,7 @@ function startExam(id) {
       : createSession(
           examQuestions.filter((q) => q.exam === id).map((q) => q.id),
           `${e.title} · ${e.subtitle}`,
-          { mode: 'exam', exam: id },
+          { mode: 'exam', exam: id, feedbackTiming: e.feedbackTiming || 'submission' },
         );
   session.attemptId ||= crypto.randomUUID();
   session.revealed ||= {};
@@ -865,12 +866,18 @@ function exit() {
 }
 function answer(value, draw = true) {
   if (!session) return;
+  if (answerLocked(session, currentQ().id)) return;
   session.answers[currentQ().id] = value;
   persist();
+  if (immediateFeedback(session)) {
+    check();
+    return;
+  }
   if (draw) render();
 }
 function check() {
   if (composing) return;
+  if (!canCheck(session) || answerLocked(session, currentQ().id)) return;
   const q = currentQ();
   if (q.type === 'particle-edit') return;
   if (!session.answers[q.id]?.trim()) {
@@ -885,6 +892,7 @@ function check() {
   } else grade(correct(q, session.answers[q.id]));
 }
 function grade(okOrRating, advance = false) {
+  if (!canCheck(session)) return;
   const q = currentQ();
   if (q.type === 'particle-edit' && session.particles?.[q.id]?.stage !== 'done') return;
   recordReview(state, session, q.id, okOrRating, Date.now());

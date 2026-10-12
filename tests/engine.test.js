@@ -47,15 +47,15 @@ test('all question ids unique and every auto question has an answer', () => {
       );
   }
 });
-test('all exams total 100 points and every original page exists', () => {
+test('all exams total their declared points and every available original page exists', () => {
   for (const e of exams) {
     assert.equal(
       examQuestions.filter((q) => q.exam === e.id).reduce((n, q) => n + q.points, 0),
-      100,
+      e.points,
       e.id,
     );
   }
-  for (const q of examQuestions)
+  for (const q of examQuestions.filter((q) => q.originalAvailable !== false))
     assert(
       existsSync(
         `public/material/${q.exam}-${q.exam === 'reading' ? String(q.page).padStart(2, '0') : q.page}.jpg`,
@@ -437,4 +437,51 @@ test('Schema compatibility guarantees version 2 and prevents reset migrations', 
   assert.equal(migrated.drafts.practice.session.index, 1);
   assert.equal(migrated.preferredCount, 10, 'Fresh defaults merged without overwriting');
   assert.equal(migrated.theme, 'classic', 'Fresh theme default merged without overwriting');
+});
+
+test('rebuildStats is idempotent and handles out-of-order review playback', () => {
+  const t0 = Date.parse('2026-10-01T10:00:00Z');
+  const t1 = Date.parse('2026-10-02T10:00:00Z');
+  const t2 = Date.parse('2026-10-05T10:00:00Z');
+  const t3 = Date.parse('2026-10-12T10:00:00Z');
+
+  const orderedReviews = [
+    { id: 'rev-0', questionId: 'q-multi', at: t0, rating: 'good', ok: true },
+    { id: 'rev-1', questionId: 'q-multi', at: t1, rating: 'good', ok: true },
+    { id: 'rev-2', questionId: 'q-multi', at: t2, rating: 'hard', ok: true },
+    { id: 'rev-3', questionId: 'q-multi', at: t3, rating: 'easy', ok: true },
+  ];
+
+  const stateForward = fresh();
+  for (const r of orderedReviews) {
+    stateForward.reviews[r.id] = r;
+  }
+  rebuildStats(stateForward);
+
+  const stateReverse = fresh();
+  for (const r of [...orderedReviews].reverse()) {
+    stateReverse.reviews[r.id] = r;
+  }
+  rebuildStats(stateReverse);
+
+  const stateShuffled = fresh();
+  stateShuffled.reviews['rev-2'] = orderedReviews[2];
+  stateShuffled.reviews['rev-0'] = orderedReviews[0];
+  stateShuffled.reviews['rev-3'] = orderedReviews[3];
+  stateShuffled.reviews['rev-1'] = orderedReviews[1];
+  rebuildStats(stateShuffled);
+
+  assert.deepEqual(
+    stateForward.stats['q-multi'],
+    stateReverse.stats['q-multi'],
+    'rebuildStats must produce identical stats regardless of review object key ordering',
+  );
+  assert.deepEqual(
+    stateForward.stats['q-multi'],
+    stateShuffled.stats['q-multi'],
+    'rebuildStats must produce identical stats for shuffled reviews',
+  );
+
+  assert.equal(stateForward.stats['q-multi'].box, 4);
+  assert.equal(stateForward.stats['q-multi'].attempts, 4);
 });

@@ -297,7 +297,7 @@ export function enrichQuestion(q) {
     ][Number(q.id.split('-').at(-1)) - 1];
   }
   if (q.self) {
-    q.checklist = [
+    q.checklist ||= [
       'Har du besvarat alla delar av frågan och tagit med de exempel eller antal meningar som efterfrågas?',
       q.topic === 'Ordföljd'
         ? 'Har du avgränsat hela fraser, hittat predikatet och skilt subjekt/tema och objekt från tid och plats?'

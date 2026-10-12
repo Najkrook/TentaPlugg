@@ -7,6 +7,3 @@ package-lock.json
 test-results
 playwright-report
 .firebase
-output
-# Generated records from earlier agent runs, not application source.
-.agents/teamwork/

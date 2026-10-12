@@ -295,3 +295,80 @@ test('CSS Contract: style.css defines anime banner styles and preserves hard-hid
   assert.ok(css.includes('.vocab-card'), 'CSS must style .vocab-card');
   assert.ok(css.includes('.particle-card'), 'CSS must style .particle-card');
 });
+
+test('Genki I vocabularyList has full data integrity and valid word types', () => {
+  assert.ok(vocabularyList.length >= 170, `Expected >= 170 items, got ${vocabularyList.length}`);
+  const ALLOWED_WORD_TYPES = [
+    'noun',
+    'time',
+    'u-verb',
+    'ru-verb',
+    'irregular-verb',
+    'i-adj',
+    'na-adj',
+    'adverb',
+    'expression',
+    'pronoun',
+    'particle',
+    'counter',
+  ];
+  const seenIds = new Set();
+  for (let i = 0; i < vocabularyList.length; i++) {
+    const item = vocabularyList[i];
+    assert.ok(typeof item.id === 'string' && item.id.length > 0, `Item ${i} must have valid id`);
+    assert.equal(seenIds.has(item.id), false, `Duplicate id found: ${item.id}`);
+    seenIds.add(item.id);
+    assert.ok(
+      typeof item.kana === 'string' && item.kana.length > 0,
+      `Item ${item.id} kana non-empty`,
+    );
+    assert.ok(
+      typeof item.romaji === 'string' && item.romaji.length > 0,
+      `Item ${item.id} romaji non-empty`,
+    );
+    assert.ok(typeof item.sv === 'string' && item.sv.length > 0, `Item ${item.id} sv non-empty`);
+    assert.ok([3, 4, 5].includes(item.lesson), `Item ${item.id} lesson 3, 4, or 5`);
+    assert.ok(
+      ALLOWED_WORD_TYPES.includes(item.wordType),
+      `Item ${item.id} valid wordType: ${item.wordType}`,
+    );
+  }
+});
+
+test('Genki I kanjiList has full data integrity with valid strokes and readings', () => {
+  assert.ok(kanjiList.length >= 43, `Expected >= 43 kanji, got ${kanjiList.length}`);
+  const seenKanjiIds = new Set();
+  for (let i = 0; i < kanjiList.length; i++) {
+    const k = kanjiList[i];
+    assert.ok(typeof k.id === 'string' && k.id.length > 0);
+    assert.equal(seenKanjiIds.has(k.id), false, `Duplicate kanji id: ${k.id}`);
+    seenKanjiIds.add(k.id);
+    assert.ok(
+      typeof k.kanji === 'string' && k.kanji.length === 1,
+      `Kanji must be 1 char: ${k.kanji}`,
+    );
+    assert.ok(typeof k.strokes === 'number' && k.strokes > 0, `Valid strokes: ${k.strokes}`);
+    assert.ok(Array.isArray(k.onyomi) && Array.isArray(k.kunyomi), `Readings must be arrays`);
+    assert.ok(Array.isArray(k.compounds) && k.compounds.length > 0, `Compounds must exist`);
+  }
+});
+
+test('Early head script FOUT prevention contract in index.html', () => {
+  const html = fs.readFileSync(path.resolve('index.html'), 'utf8');
+  assert.ok(
+    html.includes("localStorage.getItem('tentaplugg-theme')"),
+    'index.html must check stored theme',
+  );
+  assert.ok(
+    html.includes("document.documentElement.dataset.theme = 'sakura'"),
+    'index.html sets dataset.theme early',
+  );
+  const headIdx = html.indexOf('<head>');
+  const scriptIdx = html.indexOf("localStorage.getItem('tentaplugg-theme')");
+  const bodyIdx = html.indexOf('<body');
+  assert.ok(headIdx !== -1 && scriptIdx !== -1 && bodyIdx !== -1);
+  assert.ok(
+    headIdx < scriptIdx && scriptIdx < bodyIdx,
+    'Theme FOUT script must execute in <head> before <body>',
+  );
+});

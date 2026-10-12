@@ -141,6 +141,7 @@ export function selfAssessmentCriteria(q, fallback) {
 
 export function selfAssessmentGuide(q) {
   if (!q.self) return null;
+  if (q.id === 'hayashi-exam-kyoto') return 'adjectives';
   if (/^(gema70-1\.[123]$|japc11-1\.[12]$|goto-mock-1\.[12]$)/.test(q.id)) return 'writing-systems';
   if (q.id === 'japc11-2') return 'word-origins';
   if (q.topic === 'Ordföljd' || q.id.startsWith('japc11-3.')) return 'sentence-parts';

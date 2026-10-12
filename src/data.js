@@ -3,6 +3,7 @@ import { extraQuestions } from './extra-content.js';
 import { l1l5Questions } from './l1l5-data.js';
 import { calendarDayQuestions } from './calendar-days.js';
 import { enrichQuestion } from './pedagogy.js';
+import { hayashiExams, hayashiQuestions } from './hayashi-data.js';
 export { l1l5Questions, calendarDayQuestions };
 export const topics = [
   'Partiklar',
@@ -249,6 +250,7 @@ lesson.forEach(([p, a, e], i) =>
   }),
 );
 export const exams = [
+  ...hayashiExams,
   {
     id: 'gema70',
     title: 'Gotoせんせい tenta',
@@ -282,7 +284,7 @@ export const exams = [
     points: 100,
   },
 ];
-export const examQuestions = [];
+export const examQuestions = [...hayashiQuestions];
 function eq(exam, id, page, prompt, model, extra = {}) {
   const q = {
     id: `${exam}-${id}`,

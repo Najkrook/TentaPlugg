@@ -3,7 +3,7 @@ import { exams, questions, examQuestions } from '../data.js';
 import { latestAttempt, scoreAttempt, examErrors } from '../engine.js';
 import { heading, icon } from './shared.js';
 export function examsView(ctx) {
-  return html`${heading('FRÅN KURSMATERIALET', 'Gamla tentor', 'Alla uppgifter, med originalbilder och sparade svar.')}
+  return html`${heading('FRÅN KURSMATERIALET', 'Gamla tentor', 'Tentor och repetitionsblad med sparade svar.')}
     ${
       ctx.theme === 'sakura'
         ? html`<div class="anime-figure exam-anime-banner-card" aria-hidden="true">
@@ -19,8 +19,8 @@ export function examsView(ctx) {
     <div class="notice">
       ${icon('CircleHelp')}
       <p>
-        Tentorna saknar officiella facit. Modellsvaren är studiestöd. Poängen är en uppskattning och
-        längre svar rättar du själv.
+        Poängen är övningspoäng och längre svar rättar du själv. Hayashis övningar bygger på det
+        bifogade facitet. Övriga tentors modellsvar är studiestöd, inte officiella facit.
       </p>
     </div>
     <div class="exam-list">
@@ -36,8 +36,8 @@ export function examsView(ctx) {
             <p>${e.description}</p>
             <div class="exam-meta">
               <span>${examQuestions.filter((q) => q.exam === e.id).length} delfrågor</span
-              ><span>100 poäng</span
-              ><a href="/material/${e.id}.pdf" target="_blank" rel="noopener">Visa original-PDF</a>
+              ><span>${e.points} poäng</span>
+              ${e.originalAvailable !== false ? html`<a href="/material/${e.id}.pdf" target="_blank" rel="noopener">Visa original-PDF</a>` : ''}
             </div>
             ${score ? html`<p class="exam-score">Senaste poäng: <strong>${score.earned}/${score.max}</strong>${score.pending ? html`<small>${score.pending} svar väntar på självrättning · preliminärt</small>` : ''}</p>` : html`<p class="muted">Ingen poängsatt inlämning ännu.</p>`}
           </div>

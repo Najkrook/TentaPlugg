@@ -23,8 +23,17 @@ Om Windows-sandlådan blockerar testprocesser: `node --test --test-isolation=non
 - Nya sessioner använder `exerciseVersion: 1` och sparar interaktionen i `particles`, medan `answers` fortsatt innehåller text. Äldre sessioner utan denna version behåller originalfrågorna och fritextflödet. Frågevarianter och partikelpositioner finns i `src/particles.js`.
 - Originalbilder/PDF:er finns i `public/material`. Modellsvar finns i `src/data.js`.
 - Automatisk rättning av entydiga svar; självrättning för resonemang, fria meningar och terminologiskt tvetydiga frågor.
-- Varje tenta summerar till 100 övningspoäng. Läsprovets II.1 har tilldelats 10 poäng för att summera till 100; poäng står inte utsatta där i originalet. Självbedömning ger allt eller inget per delfråga och reproducerar inte en lärares partiella poängsättning.
+- De äldre tentorna summerar till 100 övningspoäng. Hayashis mobilversion har 135 och tentaversionen 131 övningspoäng. Läsprovets II.1 har tilldelats 10 poäng för att summera till 100; poäng står inte utsatta där i originalet. Självbedömning ger allt eller inget per delfråga och reproducerar inte en lärares partiella poängsättning.
 - Tentans modellösningar är inte officiella facit. Exempel på klassificeringen av kopulan och demonstrativer anges med förbehåll. Originalets formuleringar/romaniseringskonventioner kan skilja sig från andra läroböcker.
+
+## Hayashi-sensei · Lektion 5
+
+Två versioner av det åttasidiga repetitionsbladet finns under Gamla tentor:
+
+- **Mobilträning:** 135 frågor/poäng med fyra svarsalternativ, direkt rättning och låst första svar.
+- **Tentaträning:** 129 uppgifter/131 poäng med egna svar på japanska och facit först efter inlämning. Kyotodelen kräver tre meningar och självrättas för tre poäng.
+
+Båda täcker tal, tider, datum, Kyotoresan, frågeord, adverb/ord och partiklar. Utkast och resultat sparas separat. Uppgifterna är renskrivna; den facitförsedda käll-PDF:en och dess sidbilder publiceras inte. Rättningen sker som tidigare i klienten. Underlaget finns i `src/hayashi-data.js`, rättningspolicyn i `src/exam-policy.js` och specifikationen i `.scratch/hayashi-exams/spec.md`.
 
 ## Självrättning och nästa steg
 
